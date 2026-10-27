@@ -1,0 +1,26 @@
+{
+  "sample_count": 15,
+  "neural_network": {
+    "mae_centipawns": 153.14,
+    "rmse_centipawns": 204.45,
+    "correlation": -0.2613,
+    "sign_accuracy": 0.3571
+  },
+  "material_baseline": {
+    "mae_centipawns": 64.27,
+    "rmse_centipawns": 79.55,
+    "sign_accuracy": 0.6429
+  },
+  "phase_breakdown": {
+    "opening": {
+      "nn_mae": 64.07,
+      "material_mae": 61.44,
+      "count": 9
+    },
+    "middlegame": {
+      "nn_mae": 286.76,
+      "material_mae": 68.5,
+      "count": 6
+    }
+  }
+}

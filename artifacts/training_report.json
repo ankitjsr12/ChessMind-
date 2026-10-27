@@ -1,0 +1,45 @@
+{
+  "training_config": {
+    "dataset_name": "lichess_public_domain_master_games",
+    "dataset_version": "1.0.0",
+    "random_seed": 42,
+    "test_size": 0.2,
+    "max_games": 3,
+    "max_positions_per_game": 3,
+    "candidate_alternatives_per_pos": 4,
+    "model_output_dir": "/var/folders/pt/zktplx2j0797tfhl94fnx5100000gn/T/tmpvs8cjqlb/models",
+    "model_filename": "candidate_quality_model.joblib",
+    "artifacts_output_dir": "artifacts",
+    "models_to_train": [
+      "logistic_regression"
+    ]
+  },
+  "best_model": "Logistic Regression (Baseline)",
+  "metrics": [
+    {
+      "model_name": "Logistic Regression (Baseline)",
+      "accuracy": 0.6667,
+      "precision": 0.25,
+      "recall": 0.3333,
+      "f1_score": 0.2857,
+      "roc_auc": 0.5556,
+      "top1_move_accuracy": 0.3333,
+      "top3_move_accuracy": 0.6667,
+      "mrr": 0.5111,
+      "brier_score": 0.2875,
+      "class_imbalance_ratio": 4.0,
+      "confusion_matrix": [
+        [
+          9,
+          3
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "sample_count": 15
+    }
+  ],
+  "created_at": "2026-10-27T15:01:44.910285+00:00"
+}
