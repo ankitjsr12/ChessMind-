@@ -55,10 +55,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         } else if (user && !user.confirmed_at && user.identities?.length === 0) {
           setSuccessMessage('Registration initiated! Please check your email to confirm your account.');
         } else {
-          setSuccessMessage('Account created successfully! You are now logged in.');
+          setSuccessMessage(
+            isConfigured
+              ? 'Account created successfully! You are now logged in.'
+              : 'Account created! (Local Mode active until Supabase credentials are added to .env)'
+          );
           setTimeout(() => {
             onClose();
-          }, 1000);
+          }, 1200);
         }
       }
     } catch (err: any) {
@@ -92,7 +96,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         className="panel"
         style={{
           width: '100%',
-          maxWidth: '420px',
+          maxWidth: '430px',
           boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
           borderRadius: '8px',
           overflow: 'hidden',
@@ -115,7 +119,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </h2>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px', margin: 0 }}>
               {mode === 'signin'
-                ? 'Access your cloud saved games and analysis'
+                ? 'Access your saved matches and move history'
                 : 'Join to save your chess games permanently'}
             </p>
           </div>
@@ -135,19 +139,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
-        {/* Supabase Not Configured Warning */}
-        {!isConfigured && (
+        {/* Supabase Status / Setup Guidance */}
+        {!isConfigured ? (
           <div
             style={{
               padding: '12px 18px',
-              backgroundColor: '#fffbeb',
-              borderBottom: '1px solid #fef3c7',
-              fontSize: '0.82rem',
-              color: '#92400e',
+              backgroundColor: '#eff6ff',
+              borderBottom: '1px solid #dbeafe',
+              fontSize: '0.8rem',
+              color: '#1e40af',
+              lineHeight: 1.45,
             }}
           >
-            <b>Supabase setup needed:</b> Please set <code>VITE_SUPABASE_URL</code> and{' '}
-            <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env</code>.
+            <b>ℹ️ Local Mode Active:</b> You can register and save games right now.
+            <div style={{ marginTop: '4px', fontSize: '0.74rem', color: '#3b82f6' }}>
+              To sync with Supabase PostgreSQL cloud, paste your <code>VITE_SUPABASE_URL</code> and{' '}
+              <code>VITE_SUPABASE_ANON_KEY</code> into <code>frontend/.env</code>.
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              padding: '8px 18px',
+              backgroundColor: '#f0fdf4',
+              borderBottom: '1px solid #bbf7d0',
+              fontSize: '0.78rem',
+              color: '#166534',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>✓ Connected to Supabase Cloud</span>
           </div>
         )}
 
@@ -252,14 +275,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             />
             {mode === 'signup' && (
               <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px', display: 'block' }}>
-                Minimum 6 characters. Passwords are encrypted by Supabase Auth.
+                Minimum 6 characters. Passwords are secured with bcrypt / Supabase Auth.
               </span>
             )}
           </div>
 
           <button
             type="submit"
-            disabled={loading || !isConfigured}
+            disabled={loading}
             className="btn btn-primary"
             style={{
               width: '100%',

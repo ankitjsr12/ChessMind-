@@ -45,7 +45,7 @@ Create `frontend/.env.local` (or edit `frontend/.env`):
 VITE_API_URL=http://localhost:8000
 
 # Supabase Credentials (from Supabase Dashboard -> Project Settings -> API)
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_URL=https://caezrpghkazqwliefpaw.supabase.co
 VITE_SUPABASE_ANON_KEY=your-actual-supabase-anon-key
 ```
 
@@ -54,7 +54,7 @@ In your Vercel Project -> **Settings** -> **Environment Variables**:
 | Variable Name | Value | Purpose |
 | :--- | :--- | :--- |
 | `VITE_API_URL` | `https://chessmind-backend.onrender.com` | URL of your deployed FastAPI backend |
-| `VITE_SUPABASE_URL` | `https://your-project-id.supabase.co` | Supabase project API URL |
+| `VITE_SUPABASE_URL` | `https://caezrpghkazqwliefpaw.supabase.co` | Supabase project API URL |
 | `VITE_SUPABASE_ANON_KEY` | `eyJhbGciOi...` | Supabase public anon key (safe for browser) |
 
 ### C. Render Deployment (Backend)
@@ -63,7 +63,7 @@ In your Render Web Service -> **Environment**:
 | :--- | :--- | :--- |
 | `PORT` | `8000` | Port for Uvicorn |
 | `PYTHON_VERSION` | `3.11.8` or compatible | Python runtime version |
-| `SUPABASE_URL` | *(Optional)* `https://your-project-id.supabase.co` | Backend Supabase access |
+| `SUPABASE_URL` | *(Optional)* `https://caezrpghkazqwliefpaw.supabase.co` | Backend Supabase access |
 | `SUPABASE_SERVICE_ROLE_KEY`| *(Optional)* `secret...` | Strictly private backend key (never in frontend) |
 
 ---

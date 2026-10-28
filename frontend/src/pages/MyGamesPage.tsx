@@ -116,21 +116,21 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
                 marginBottom: '20px',
                 padding: '12px 16px',
                 borderRadius: '6px',
-                backgroundColor: '#fffbeb',
-                border: '1px solid #fef3c7',
+                backgroundColor: '#eff6ff',
+                border: '1px solid #dbeafe',
                 fontSize: '0.82rem',
-                color: '#92400e',
+                color: '#1e40af',
                 textAlign: 'left',
               }}
             >
-              <b>Supabase setup needed:</b> Set <code>VITE_SUPABASE_URL</code> and{' '}
-              <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env</code> to activate cloud database integration.
+              <b>💾 Local Storage Mode:</b> You can create an account and save games locally right now.
+              To sync games with Supabase PostgreSQL cloud, paste your <code>VITE_SUPABASE_URL</code> and{' '}
+              <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env</code>.
             </div>
           )}
 
           <button
             onClick={onOpenAuth}
-            disabled={!isConfigured}
             className="btn btn-primary"
             style={{ padding: '8px 20px', fontSize: '0.9rem' }}
           >
@@ -146,9 +146,20 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
       {/* Header */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 className="page-title">My Saved Games</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h1 className="page-title" style={{ margin: 0 }}>My Saved Games</h1>
+            {isConfigured ? (
+              <span className="status-badge" style={{ backgroundColor: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '0.72rem' }}>
+                ☁️ Supabase Cloud
+              </span>
+            ) : (
+              <span className="status-badge" style={{ backgroundColor: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '0.72rem' }}>
+                💾 Local Storage Mode
+              </span>
+            )}
+          </div>
           <p className="page-description">
-            Your permanent cloud game library, backed by Supabase PostgreSQL with Row Level Security.
+            Your saved game library with full move histories and engine analyses.
           </p>
         </div>
         <button
