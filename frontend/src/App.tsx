@@ -6,14 +6,22 @@ import { AnalysisPage } from './pages/AnalysisPage';
 import { PredictionPage } from './pages/PredictionPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { PerformancePage } from './pages/PerformancePage';
+import { MyGamesPage } from './pages/MyGamesPage';
+import { AuthModal } from './components/AuthModal';
+import { AuthProvider } from './context/AuthContext';
 import { api } from './services/api';
 import type { HealthStatus } from './types';
+import type { DbGame } from './types/database';
 
-export const App: React.FC = () => {
+const MainApp: React.FC = () => {
   const [activePage, setActivePage] = useState<PageId>('play');
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState<boolean>(true);
   const [healthError, setHealthError] = useState<string | null>(null);
+
+  // Authentication & Game Resume Modal States
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [gameToResume, setGameToResume] = useState<DbGame | null>(null);
 
   const fetchHealth = useCallback(async () => {
     setHealthLoading(true);
@@ -37,22 +45,28 @@ export const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchHealth]);
 
+  const handleResumeGame = (game: DbGame) => {
+    setGameToResume(game);
+    setActivePage('play');
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Clean Top Navigation Bar */}
+      {/* Clean Top Navigation Bar with Supabase Auth Controls */}
       <Navigation
         activePage={activePage}
         onPageSelect={(p) => setActivePage(p)}
         health={health}
         healthLoading={healthLoading}
         onRefreshHealth={fetchHealth}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Main Container */}
       <main className="main-layout" style={{ flex: 1 }}>
         {/* Offline Warning Banner */}
         {healthError && (
-          <div className="banner-error" style={{ justifyContent: 'space-between' }}>
+          <div className="banner-error" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
             <div>
               <b>Backend Disconnected:</b> {healthError}
             </div>
@@ -63,12 +77,32 @@ export const App: React.FC = () => {
         )}
 
         {/* Active Page View */}
-        {activePage === 'play' && <PlayPage />}
-        {activePage === 'analysis' && <AnalysisPage />}
+        {activePage === 'play' && (
+          <PlayPage
+            key={gameToResume?.id || 'new-game'}
+            initialGameToResume={gameToResume}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+          />
+        )}
+        {activePage === 'analysis' && (
+          <AnalysisPage onOpenAuth={() => setIsAuthModalOpen(true)} />
+        )}
         {activePage === 'prediction' && <PredictionPage />}
+        {activePage === 'my-games' && (
+          <MyGamesPage
+            onResumeGame={handleResumeGame}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+          />
+        )}
         {activePage === 'history' && <HistoryPage />}
         {activePage === 'performance' && <PerformancePage />}
       </main>
+
+      {/* Supabase Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
 
       {/* Clean Footer */}
       <footer
@@ -81,9 +115,17 @@ export const App: React.FC = () => {
           color: 'var(--text-muted)',
         }}
       >
-        ChessMind AI — Intelligent Chess Move Predictor & Analysis System
+        ChessMind AI — Intelligent Chess Move Predictor & Analysis System with Supabase PostgreSQL
       </footer>
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <MainApp />
+    </AuthProvider>
   );
 };
 

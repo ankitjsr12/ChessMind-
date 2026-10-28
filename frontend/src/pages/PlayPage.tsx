@@ -1,22 +1,74 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Chess } from 'chess.js';
 import type { Square } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import { api } from '../services/api';
 import type { MoveRecord } from '../types';
+import type { DbGame } from '../types/database';
 import { MoveHistory } from '../components/MoveHistory';
+import { useAuth } from '../context/AuthContext';
+import { SupabaseChessService } from '../services/supabaseChess';
 
-export const PlayPage: React.FC = () => {
-  const [game, setGame] = useState<Chess>(new Chess());
+interface PlayPageProps {
+  initialGameToResume?: DbGame | null;
+  onOpenAuth?: () => void;
+}
+
+export const PlayPage: React.FC<PlayPageProps> = ({ initialGameToResume, onOpenAuth }) => {
+  const { user } = useAuth();
+  const [game, setGame] = useState<Chess>(() => {
+    if (initialGameToResume?.current_fen) {
+      try {
+        return new Chess(initialGameToResume.current_fen);
+      } catch {
+        return new Chess();
+      }
+    }
+    return new Chess();
+  });
+
   const [history, setHistory] = useState<MoveRecord[]>([]);
-  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'master' | 'neural'>('medium');
-  const [orientation, setOrientation] = useState<'white' | 'black'>('white');
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'master' | 'neural'>(
+    (initialGameToResume?.opponent_type as any) || 'medium'
+  );
+  const [orientation, setOrientation] = useState<'white' | 'black'>(
+    initialGameToResume?.player_colour || 'white'
+  );
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>('White to move');
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [possibleMoves, setPossibleMoves] = useState<Square[]>([]);
   const [gameOverMessage, setGameOverMessage] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Cloud Save State
+  const [savedGameId, setSavedGameId] = useState<string | null>(initialGameToResume?.id || null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(
+    initialGameToResume ? 'Resumed saved cloud game' : null
+  );
+
+  // Load existing moves if resuming
+  useEffect(() => {
+    if (initialGameToResume?.id) {
+      setSavedGameId(initialGameToResume.id);
+      SupabaseChessService.getGameDetails(initialGameToResume.id)
+        .then((details) => {
+          if (details.moves && details.moves.length > 0) {
+            const reconstructed: MoveRecord[] = details.moves.map((m, idx) => ({
+              san: m.san,
+              uci: m.uci,
+              from: m.uci.slice(0, 2),
+              to: m.uci.slice(2, 4),
+              fenAfter: m.fen_after_move,
+              turn: idx % 2 === 0 ? 'white' : 'black',
+            }));
+            setHistory(reconstructed);
+          }
+        })
+        .catch((err) => console.warn('Could not restore game moves:', err));
+    }
+  }, [initialGameToResume]);
 
   // Compute captured pieces
   const capturedPieces = useMemo(() => {
@@ -54,27 +106,43 @@ export const PlayPage: React.FC = () => {
     return captured;
   }, [game]);
 
-  const updateStatus = useCallback((currentGame: Chess) => {
-    if (currentGame.isCheckmate()) {
-      const winner = currentGame.turn() === 'w' ? 'Black' : 'White';
-      const msg = `Checkmate! ${winner} wins.`;
-      setStatusMessage(msg);
-      setGameOverMessage(msg);
-    } else if (currentGame.isDraw()) {
-      let reason = 'Draw';
-      if (currentGame.isStalemate()) reason = 'Stalemate';
-      else if (currentGame.isThreefoldRepetition()) reason = 'Threefold Repetition';
-      else if (currentGame.isInsufficientMaterial()) reason = 'Insufficient Material';
-      const msg = `Game drawn by ${reason}.`;
-      setStatusMessage(msg);
-      setGameOverMessage(msg);
-    } else if (currentGame.inCheck()) {
-      setStatusMessage(`${currentGame.turn() === 'w' ? 'White' : 'Black'} is in check!`);
-    } else {
-      setStatusMessage(`${currentGame.turn() === 'w' ? 'White' : 'Black'} to move`);
-      setGameOverMessage(null);
-    }
-  }, []);
+  const updateStatus = useCallback(
+    (currentGame: Chess, activeGameId?: string | null) => {
+      let resultStr: '1-0' | '0-1' | '1/2-1/2' | '*' = '*';
+      if (currentGame.isCheckmate()) {
+        const winner = currentGame.turn() === 'w' ? 'Black' : 'White';
+        const msg = `Checkmate! ${winner} wins.`;
+        setStatusMessage(msg);
+        setGameOverMessage(msg);
+        resultStr = currentGame.turn() === 'w' ? '0-1' : '1-0';
+      } else if (currentGame.isDraw()) {
+        let reason = 'Draw';
+        if (currentGame.isStalemate()) reason = 'Stalemate';
+        else if (currentGame.isThreefoldRepetition()) reason = 'Threefold Repetition';
+        else if (currentGame.isInsufficientMaterial()) reason = 'Insufficient Material';
+        const msg = `Game drawn by ${reason}.`;
+        setStatusMessage(msg);
+        setGameOverMessage(msg);
+        resultStr = '1/2-1/2';
+      } else if (currentGame.inCheck()) {
+        setStatusMessage(`${currentGame.turn() === 'w' ? 'White' : 'Black'} is in check!`);
+      } else {
+        setStatusMessage(`${currentGame.turn() === 'w' ? 'White' : 'Black'} to move`);
+        setGameOverMessage(null);
+      }
+
+      // Automatically sync final game result to Supabase if saved
+      const targetId = activeGameId !== undefined ? activeGameId : savedGameId;
+      if (targetId && resultStr !== '*') {
+        SupabaseChessService.updateGameResult(targetId, {
+          result: resultStr,
+          currentFen: currentGame.fen(),
+          pgn: currentGame.pgn(),
+        }).catch((err) => console.warn('Could not finalize game in Supabase:', err));
+      }
+    },
+    [savedGameId]
+  );
 
   const triggerAiMove = useCallback(
     async (currentGame: Chess) => {
@@ -110,6 +178,16 @@ export const PlayPage: React.FC = () => {
               },
             ]);
             updateStatus(newGame);
+
+            // Auto-sync AI move to Supabase if game is saved
+            if (savedGameId) {
+              SupabaseChessService.appendMove(savedGameId, {
+                moveNumber: history.length + 1,
+                san: moveResult.san,
+                uci: moveResult.lan || `${moveResult.from}${moveResult.to}`,
+                fenAfterMove: newGame.fen(),
+              }).catch((err) => console.warn('Error syncing AI move to Supabase:', err));
+            }
           }
         }
       } catch (err: any) {
@@ -118,7 +196,7 @@ export const PlayPage: React.FC = () => {
         setIsAiThinking(false);
       }
     },
-    [difficulty, updateStatus]
+    [difficulty, updateStatus, savedGameId, history.length]
   );
 
   const onDrop = (sourceSquare: Square, targetSquare: Square): boolean => {
@@ -155,6 +233,16 @@ export const PlayPage: React.FC = () => {
       setHistory((prev) => [...prev, newRecord]);
       updateStatus(newGame);
 
+      // Auto-sync player move to Supabase if game is saved
+      if (savedGameId) {
+        SupabaseChessService.appendMove(savedGameId, {
+          moveNumber: history.length + 1,
+          san: move.san,
+          uci: move.lan || `${move.from}${move.to}`,
+          fenAfterMove: newGame.fen(),
+        }).catch((err) => console.warn('Error syncing player move to Supabase:', err));
+      }
+
       if (!newGame.isGameOver()) {
         setTimeout(() => triggerAiMove(newGame), 250);
       }
@@ -169,12 +257,18 @@ export const PlayPage: React.FC = () => {
     if (isAiThinking || game.isGameOver()) return;
 
     if (selectedSquare) {
-      const moveSuccess = onDrop(selectedSquare, square);
-      if (moveSuccess) return;
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        setPossibleMoves([]);
+        return;
+      }
+
+      const moveSuccessful = onDrop(selectedSquare, square);
+      if (moveSuccessful) return;
     }
 
     const piece = game.get(square);
-    if (piece && piece.color === game.turn()) {
+    if (piece && ((orientation === 'white' && piece.color === 'w') || (orientation === 'black' && piece.color === 'b'))) {
       setSelectedSquare(square);
       const moves = game.moves({ square, verbose: true });
       setPossibleMoves(moves.map((m) => m.to as Square));
@@ -184,28 +278,89 @@ export const PlayPage: React.FC = () => {
     }
   };
 
-  const handleUndo = () => {
-    if (isAiThinking || history.length === 0) return;
-    const newGame = new Chess();
-    const newHistory = history.slice(0, Math.max(0, history.length - 2));
-    for (const h of newHistory) newGame.move(h.san);
-    setGame(newGame);
-    setHistory(newHistory);
-    setSelectedSquare(null);
-    setPossibleMoves([]);
-    updateStatus(newGame);
-    setGameOverMessage(null);
-  };
-
   const handleRestart = () => {
-    const newGame = new Chess();
-    setGame(newGame);
+    const freshGame = new Chess();
+    setGame(freshGame);
     setHistory([]);
     setSelectedSquare(null);
     setPossibleMoves([]);
     setGameOverMessage(null);
     setApiError(null);
-    updateStatus(newGame);
+    setSavedGameId(null);
+    setSaveSuccessMsg(null);
+    updateStatus(freshGame, null);
+  };
+
+  const handleUndo = () => {
+    if (history.length === 0 || isAiThinking) return;
+    const movesToUndo = history.length >= 2 ? 2 : 1;
+    const newHistory = history.slice(0, history.length - movesToUndo);
+
+    const reconstructed = new Chess();
+    for (const item of newHistory) {
+      try {
+        reconstructed.move(item.san);
+      } catch {
+        // Fallback
+      }
+    }
+
+    setGame(reconstructed);
+    setHistory(newHistory);
+    setSelectedSquare(null);
+    setPossibleMoves([]);
+    updateStatus(reconstructed);
+  };
+
+  // Explicit Save to Cloud Action
+  const handleSaveToCloud = async () => {
+    if (!user) {
+      if (onOpenAuth) onOpenAuth();
+      else alert('Please sign in to save your match to Supabase PostgreSQL.');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveSuccessMsg(null);
+    setApiError(null);
+
+    try {
+      const created = await SupabaseChessService.createGame({
+        playerColour: orientation,
+        opponentType: difficulty,
+        startingFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+        title: `Match vs ${difficulty.toUpperCase()} AI`,
+      });
+
+      setSavedGameId(created.id);
+
+      // Save all existing moves into the new game
+      for (let i = 0; i < history.length; i++) {
+        const item = history[i];
+        await SupabaseChessService.appendMove(created.id, {
+          moveNumber: i + 1,
+          san: item.san,
+          uci: item.uci,
+          fenAfterMove: item.fenAfter,
+        });
+      }
+
+      // If game is over, save result immediately
+      if (game.isGameOver()) {
+        const result = game.isCheckmate() ? (game.turn() === 'w' ? '0-1' : '1-0') : '1/2-1/2';
+        await SupabaseChessService.updateGameResult(created.id, {
+          result,
+          currentFen: game.fen(),
+          pgn: game.pgn(),
+        });
+      }
+
+      setSaveSuccessMsg('Game saved to Supabase! Future moves will sync automatically.');
+    } catch (err: any) {
+      setApiError(err.message || 'Failed to save game to Supabase.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const customSquareStyles = useMemo(() => {
@@ -218,70 +373,144 @@ export const PlayPage: React.FC = () => {
     }
 
     possibleMoves.forEach((sq) => {
+      const isOccupied = Boolean(game.get(sq));
       styles[sq] = {
-        background: 'radial-gradient(circle, rgba(0, 0, 0, 0.25) 25%, transparent 26%)',
-        borderRadius: '50%',
-        cursor: 'pointer',
+        background: isOccupied
+          ? 'radial-gradient(circle, transparent 20%, rgba(0, 0, 0, 0.25) 21%, transparent 70%)'
+          : 'radial-gradient(circle, rgba(0, 0, 0, 0.2) 25%, transparent 26%)',
+        borderRadius: isOccupied ? '50%' : undefined,
       };
     });
 
-    if (history.length > 0) {
-      const last = history[history.length - 1];
-      styles[last.from] = { backgroundColor: 'rgba(255, 255, 0, 0.2)' };
-      styles[last.to] = { backgroundColor: 'rgba(255, 255, 0, 0.3)' };
+    if (game.inCheck()) {
+      const kingSquare = game
+        .board()
+        .flatMap((row, r) =>
+          row.map((piece, c) => {
+            if (piece && piece.type === 'k' && piece.color === game.turn()) {
+              const file = String.fromCharCode(97 + c);
+              const rank = 8 - r;
+              return `${file}${rank}` as Square;
+            }
+            return null;
+          })
+        )
+        .find(Boolean);
+
+      if (kingSquare) {
+        styles[kingSquare] = {
+          backgroundColor: 'rgba(220, 38, 38, 0.65)',
+        };
+      }
     }
 
     return styles;
-  }, [selectedSquare, possibleMoves, history]);
+  }, [game, selectedSquare, possibleMoves]);
 
   return (
     <div>
-      <div className="page-header">
+      {/* Page Title & Controls Bar */}
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 className="page-title">Play Chess</h1>
-          <p className="page-description">Play a standard chess game against the ChessMind AI engine.</p>
+          <p className="page-description">
+            Play against intelligent AI models with move validation and cloud PostgreSQL persistence.
+          </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>AI Difficulty:</span>
-          <select
-            className="select-input"
-            value={difficulty}
-            onChange={(e) => setDifficulty(e.target.value as any)}
-            disabled={isAiThinking}
-          >
-            <option value="easy">Easy (Shallow Search)</option>
-            <option value="medium">Medium (Minimax Depth 3)</option>
-            <option value="master">Master (Alpha-Beta)</option>
-            <option value="neural">Neural Network (ResNet)</option>
-          </select>
+        {/* Cloud Sync Status / Save Button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {savedGameId ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                borderRadius: '4px',
+                backgroundColor: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                fontSize: '0.78rem',
+                color: '#166534',
+                fontWeight: 600,
+              }}
+              title={`Game ID: ${savedGameId}`}
+            >
+              <span>☁️ Cloud Synced</span>
+            </div>
+          ) : (
+            <button
+              onClick={handleSaveToCloud}
+              disabled={isSaving}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+              title="Save current game to Supabase PostgreSQL"
+            >
+              {isSaving ? 'Saving...' : '☁️ Save to Cloud'}
+            </button>
+          )}
+
+          {/* AI Difficulty Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>AI Opponent:</span>
+            <select
+              value={difficulty}
+              onChange={(e) => setDifficulty(e.target.value as any)}
+              disabled={isAiThinking}
+              className="select-input"
+            >
+              <option value="easy">Easy (Minimax D1)</option>
+              <option value="medium">Medium (Minimax D3)</option>
+              <option value="master">Master (Stockfish / Hybrid)</option>
+              <option value="neural">Neural Network (PyTorch)</option>
+            </select>
+          </div>
         </div>
       </div>
 
       {apiError && (
-        <div className="banner-error">
+        <div className="banner-error" style={{ marginBottom: '16px' }}>
           <span>⚠️ {apiError}</span>
         </div>
       )}
 
-      {gameOverMessage && (
-        <div className="banner-info" style={{ justifyContent: 'space-between' }}>
-          <span><b>Game Over:</b> {gameOverMessage}</span>
-          <button onClick={handleRestart} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '0.78rem' }}>
-            Play Again
+      {saveSuccessMsg && (
+        <div
+          style={{
+            marginBottom: '16px',
+            padding: '8px 14px',
+            borderRadius: '4px',
+            backgroundColor: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            color: '#166534',
+            fontSize: '0.82rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span>✓ {saveSuccessMsg}</span>
+          <button
+            onClick={() => setSaveSuccessMsg(null)}
+            style={{ background: 'none', border: 'none', color: '#166534', cursor: 'pointer' }}
+          >
+            ✕
           </button>
         </div>
       )}
 
-      <div className="chess-grid">
-        {/* Left: Chessboard */}
-        <div>
+      {/* Main Chessboard + Move History Layout */}
+      <div className="board-layout">
+        {/* Left: Traditional Chessboard */}
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '520px' }}>
           {/* Opponent Info & Captured White Pieces */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', padding: '0 4px' }}>
-            <div style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-              AI ({difficulty.toUpperCase()})
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                ChessMind AI ({difficulty.toUpperCase()})
+              </span>
               {isAiThinking && (
-                <span style={{ marginLeft: '8px', fontSize: '0.78rem', color: 'var(--chess-blue)', fontWeight: 500 }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--chess-blue)', fontWeight: 600 }}>
                   Thinking...
                 </span>
               )}
@@ -293,8 +522,50 @@ export const PlayPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Board */}
-          <div className="board-container" style={{ margin: '0 auto', maxWidth: '520px', width: '100%' }}>
+          {/* Chessboard Container */}
+          <div
+            className="board-container"
+            style={{
+              width: '100%',
+              aspectRatio: '1/1',
+              position: 'relative',
+            }}
+          >
+            {gameOverMessage && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 20,
+                  borderRadius: '6px',
+                  color: '#ffffff',
+                  padding: '20px',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '8px' }}>Game Finished</div>
+                <div style={{ fontSize: '1rem', color: '#cbd5e1', marginBottom: '20px' }}>{gameOverMessage}</div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={handleRestart} className="btn btn-primary">
+                    Play Again
+                  </button>
+                  {!savedGameId && user && (
+                    <button onClick={handleSaveToCloud} disabled={isSaving} className="btn btn-secondary" style={{ backgroundColor: '#ffffff', color: '#0f172a' }}>
+                      {isSaving ? 'Saving...' : 'Save to Cloud'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <Chessboard
               options={{
                 position: game.fen(),
@@ -313,7 +584,7 @@ export const PlayPage: React.FC = () => {
           {/* Player Info & Captured Black Pieces */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', padding: '0 4px' }}>
             <div style={{ fontSize: '0.88rem', fontWeight: 600 }}>
-              You (White)
+              You ({orientation === 'white' ? 'White' : 'Black'})
             </div>
             <div className="captured-bar">
               {capturedPieces.black.map((sym, i) => (

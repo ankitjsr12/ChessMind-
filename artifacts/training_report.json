@@ -7,7 +7,7 @@
     "max_games": 3,
     "max_positions_per_game": 3,
     "candidate_alternatives_per_pos": 4,
-    "model_output_dir": "/var/folders/pt/zktplx2j0797tfhl94fnx5100000gn/T/tmpvs8cjqlb/models",
+    "model_output_dir": "/var/folders/pt/zktplx2j0797tfhl94fnx5100000gn/T/tmpq5k8zs10/models",
     "model_filename": "candidate_quality_model.joblib",
     "artifacts_output_dir": "artifacts",
     "models_to_train": [
@@ -41,5 +41,5 @@
       "sample_count": 15
     }
   ],
-  "created_at": "2026-10-27T15:01:44.910285+00:00"
+  "created_at": "2026-10-28T08:00:24.630315+00:00"
 }

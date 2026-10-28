@@ -1,7 +1,8 @@
 import React from 'react';
 import type { HealthStatus } from '../types';
+import { useAuth } from '../context/AuthContext';
 
-export type PageId = 'play' | 'analysis' | 'prediction' | 'history' | 'performance';
+export type PageId = 'play' | 'analysis' | 'prediction' | 'history' | 'performance' | 'my-games';
 
 interface NavigationProps {
   activePage: PageId;
@@ -9,12 +10,14 @@ interface NavigationProps {
   health: HealthStatus | null;
   healthLoading: boolean;
   onRefreshHealth: () => void;
+  onOpenAuth: () => void;
 }
 
 const navItems: Array<{ id: PageId; label: string }> = [
   { id: 'play', label: 'Play Chess' },
   { id: 'analysis', label: 'Game Analysis' },
   { id: 'prediction', label: 'Move Prediction' },
+  { id: 'my-games', label: 'My Games' },
   { id: 'history', label: 'Game History' },
   { id: 'performance', label: 'Model Performance' },
 ];
@@ -25,8 +28,13 @@ export const Navigation: React.FC<NavigationProps> = ({
   health,
   healthLoading,
   onRefreshHealth,
+  onOpenAuth,
 }) => {
   const isHealthy = health?.status === 'healthy';
+  const { user, profile, signOut, isConfigured } = useAuth();
+
+  const userDisplayName =
+    profile?.display_name || user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'User';
 
   return (
     <header className="header">
@@ -74,8 +82,9 @@ export const Navigation: React.FC<NavigationProps> = ({
           </ul>
         </nav>
 
-        {/* Backend Status Pill */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Right Status Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Backend Status Pill */}
           <button
             onClick={onRefreshHealth}
             title={isHealthy ? 'Connected to backend' : 'Backend is unreachable - click to retry'}
@@ -101,8 +110,66 @@ export const Navigation: React.FC<NavigationProps> = ({
                 backgroundColor: isHealthy ? '#16a34a' : '#dc2626',
               }}
             />
-            {healthLoading ? 'Checking...' : isHealthy ? 'Connected' : 'Offline'}
+            {healthLoading ? 'Checking...' : isHealthy ? 'Backend Connected' : 'Offline'}
           </button>
+
+          {/* User Auth Controls */}
+          {user ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: 'var(--bg-subtle)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  color: 'var(--text-main)',
+                }}
+                title={`Signed in as ${user.email}`}
+              >
+                <span
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--chess-blue)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {userDisplayName.charAt(0).toUpperCase()}
+                </span>
+                <span style={{ maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {userDisplayName}
+                </span>
+              </div>
+              <button
+                onClick={() => signOut()}
+                className="btn btn-secondary"
+                style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                title="Sign out of Supabase"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenAuth}
+              className="btn btn-primary"
+              style={{ padding: '5px 12px', fontSize: '0.8rem' }}
+              title={isConfigured ? 'Sign in or register' : 'Configure Supabase credentials in .env to enable auth'}
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </div>
     </header>

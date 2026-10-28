@@ -8,8 +8,15 @@ import type { CandidateMove } from '../types';
 import { EvaluationBar } from '../components/EvaluationBar';
 import { CandidateMovesList } from '../components/CandidateMovesList';
 import { ExplainableAIPanel } from '../components/ExplainableAIPanel';
+import { useAuth } from '../context/AuthContext';
+import { SupabaseChessService } from '../services/supabaseChess';
 
-export const AnalysisPage: React.FC = () => {
+interface AnalysisPageProps {
+  onOpenAuth?: () => void;
+}
+
+export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
+  const { user } = useAuth();
   const [game, setGame] = useState<Chess>(new Chess());
   const [fenInput, setFenInput] = useState<string>(new Chess().fen());
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
@@ -23,9 +30,13 @@ export const AnalysisPage: React.FC = () => {
   const [tacticalThreat, setTacticalThreat] = useState<string | undefined>();
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateMove | null>(null);
 
+  const [isSavingAnalysis, setIsSavingAnalysis] = useState<boolean>(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+
   const runAnalysis = useCallback(async (currentFen: string) => {
     setLoading(true);
     setError(null);
+    setSaveSuccessMsg(null);
     try {
       const bestMoveData = await api.predictBestMoves(currentFen);
 
@@ -109,14 +120,13 @@ export const AnalysisPage: React.FC = () => {
     }
   };
 
-  const handleLoadFen = (customFen: string) => {
+  const handleLoadFen = (fenToLoad: string) => {
     try {
-      const newGame = new Chess(customFen.trim());
+      const newGame = new Chess(fenToLoad.trim());
       setGame(newGame);
-      setFenInput(newGame.fen());
       setError(null);
     } catch {
-      setError('Invalid FEN format. Please enter a valid chess board notation.');
+      setError('Invalid FEN format. Please provide a standard 6-field chess FEN.');
     }
   };
 
@@ -125,6 +135,58 @@ export const AnalysisPage: React.FC = () => {
     setGame(newGame);
     setFenInput(newGame.fen());
     setError(null);
+    setSaveSuccessMsg(null);
+  };
+
+  const handleSaveAnalysis = async () => {
+    if (!user) {
+      if (onOpenAuth) onOpenAuth();
+      else alert('Please sign in to save analysis to Supabase.');
+      return;
+    }
+
+    if (!bestMove) {
+      alert('Please wait for position analysis to complete before saving.');
+      return;
+    }
+
+    setIsSavingAnalysis(true);
+    setError(null);
+    try {
+      // 1. Create a game reference for this analyzed position
+      const gameRecord = await SupabaseChessService.createGame({
+        playerColour: game.turn() === 'w' ? 'white' : 'black',
+        opponentType: 'Analysis Board',
+        startingFen: game.fen(),
+        title: `Analysis: ${bestMove.san} (${evaluationText})`,
+      });
+
+      // 2. Save analysis record linked to this game
+      await SupabaseChessService.saveGameAnalysis({
+        gameId: gameRecord.id,
+        bestMove: bestMove.san,
+        evaluationScore: scoreCentipawns,
+        searchDepth: 3,
+        analysisSummary: {
+          fen: game.fen(),
+          evaluation_text: evaluationText,
+          candidates_count: candidates.length,
+          top_candidates: candidates.slice(0, 3).map((c) => ({
+            san: c.san,
+            uci: c.uci,
+            eval: c.evaluationText,
+            tier: c.qualityTier,
+          })),
+          tactical_threat: tacticalThreat,
+        },
+      });
+
+      setSaveSuccessMsg(`Analysis saved to cloud! Viewable anytime in "My Games".`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save analysis to Supabase.');
+    } finally {
+      setIsSavingAnalysis(false);
+    }
   };
 
   const customArrows: Arrow[] = useMemo(() => {
@@ -139,7 +201,7 @@ export const AnalysisPage: React.FC = () => {
 
   return (
     <div>
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 className="page-title">Game Analysis</h1>
           <p className="page-description">
@@ -164,8 +226,33 @@ export const AnalysisPage: React.FC = () => {
       </div>
 
       {error && (
-        <div className="banner-error">
+        <div className="banner-error" style={{ marginBottom: '16px' }}>
           <span>⚠️ {error}</span>
+        </div>
+      )}
+
+      {saveSuccessMsg && (
+        <div
+          style={{
+            marginBottom: '16px',
+            padding: '8px 14px',
+            borderRadius: '4px',
+            backgroundColor: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            color: '#166534',
+            fontSize: '0.82rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span>✓ {saveSuccessMsg}</span>
+          <button
+            onClick={() => setSaveSuccessMsg(null)}
+            style={{ background: 'none', border: 'none', color: '#166534', cursor: 'pointer' }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -196,7 +283,7 @@ export const AnalysisPage: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', marginTop: '14px', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '14px', justifyContent: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={() => runAnalysis(game.fen())}
               disabled={loading}
@@ -205,13 +292,21 @@ export const AnalysisPage: React.FC = () => {
               {loading ? 'Analyzing...' : 'Re-analyze'}
             </button>
             <button
+              onClick={handleSaveAnalysis}
+              disabled={isSavingAnalysis || loading}
+              className="btn btn-secondary"
+              title="Save current position and engine analysis to Supabase"
+            >
+              {isSavingAnalysis ? 'Saving...' : '☁️ Save Analysis'}
+            </button>
+            <button
               onClick={() => setOrientation((o) => (o === 'white' ? 'black' : 'white'))}
               className="btn btn-secondary"
             >
               Flip Board
             </button>
             <button onClick={handleReset} className="btn btn-secondary">
-              Reset Starting Position
+              Reset Position
             </button>
           </div>
         </div>
