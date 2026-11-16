@@ -5,15 +5,15 @@ import { useAuth } from '../context/AuthContext';
 export type PageId = 'play' | 'analysis' | 'prediction' | 'history' | 'performance' | 'my-games';
 
 interface NavigationProps {
-  activePage: PageId;
-  onPageSelect: (page: PageId) => void;
+  activePage: PageId | string;
+  onPageSelect: (pageId: PageId) => void;
   health: HealthStatus | null;
   healthLoading: boolean;
   onRefreshHealth: () => void;
   onOpenAuth: () => void;
 }
 
-const navItems: Array<{ id: PageId; label: string }> = [
+const NAV_ITEMS: Array<{ id: PageId; label: string }> = [
   { id: 'play', label: 'Play Chess' },
   { id: 'analysis', label: 'Game Analysis' },
   { id: 'prediction', label: 'Move Prediction' },
@@ -31,7 +31,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   onOpenAuth,
 }) => {
   const isHealthy = health?.status === 'healthy';
-  const { user, profile, signOut, isConfigured } = useAuth();
+  const { user, profile, signOut, isConfigured, connectionStatus, refreshConnection } = useAuth();
 
   const userDisplayName =
     profile?.display_name || user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'User';
@@ -63,10 +63,10 @@ export const Navigation: React.FC<NavigationProps> = ({
           <span className="brand-badge">Engine</span>
         </div>
 
-        {/* Navigation Links */}
+        {/* Navigation Items */}
         <nav>
           <ul className="nav-menu">
-            {navItems.map((item) => {
+            {NAV_ITEMS.map((item) => {
               const isActive = activePage === item.id;
               return (
                 <li key={item.id}>
@@ -82,12 +82,12 @@ export const Navigation: React.FC<NavigationProps> = ({
           </ul>
         </nav>
 
-        {/* Right Status Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Backend Status Pill */}
+        {/* Right Status & Auth Section */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Backend Status Indicator */}
           <button
             onClick={onRefreshHealth}
-            title={isHealthy ? 'Connected to backend' : 'Backend is unreachable - click to retry'}
+            title={isHealthy ? 'Connected to Python backend' : 'Backend is unreachable - click to retry'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -96,7 +96,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               borderRadius: '12px',
               backgroundColor: isHealthy ? '#f0fdf4' : '#fef2f2',
               border: `1px solid ${isHealthy ? '#bbf7d0' : '#fecaca'}`,
-              fontSize: '0.78rem',
+              fontSize: '0.76rem',
               fontWeight: 600,
               color: isHealthy ? '#166534' : '#991b1b',
               cursor: 'pointer',
@@ -113,7 +113,77 @@ export const Navigation: React.FC<NavigationProps> = ({
             {healthLoading ? 'Checking...' : isHealthy ? 'Backend Connected' : 'Offline'}
           </button>
 
-          {/* User Auth Controls */}
+          {/* Supabase Cloud Connection Status */}
+          <button
+            type="button"
+            onClick={refreshConnection}
+            title={
+              connectionStatus === 'connected'
+                ? 'Connected: Supabase Cloud'
+                : connectionStatus === 'disconnected'
+                ? 'Disconnected: Cloud connection unavailable (click to retry)'
+                : connectionStatus === 'not_configured'
+                ? 'Not Configured: Supabase credentials missing'
+                : 'Syncing: Synchronizing data'
+            }
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '12px',
+              backgroundColor:
+                connectionStatus === 'connected'
+                  ? '#f0fdf4'
+                  : connectionStatus === 'syncing'
+                  ? '#eff6ff'
+                  : connectionStatus === 'not_configured'
+                  ? '#fff7ed'
+                  : '#fef2f2',
+              border: `1px solid ${
+                connectionStatus === 'connected'
+                  ? '#bbf7d0'
+                  : connectionStatus === 'syncing'
+                  ? '#bfdbfe'
+                  : connectionStatus === 'not_configured'
+                  ? '#fed7aa'
+                  : '#fecaca'
+              }`,
+              fontSize: '0.76rem',
+              fontWeight: 600,
+              color:
+                connectionStatus === 'connected'
+                  ? '#166534'
+                  : connectionStatus === 'syncing'
+                  ? '#1e40af'
+                  : connectionStatus === 'not_configured'
+                  ? '#9a3412'
+                  : '#991b1b',
+              cursor: 'pointer',
+            }}
+          >
+            <span
+              style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                backgroundColor:
+                  connectionStatus === 'connected'
+                    ? '#16a34a'
+                    : connectionStatus === 'syncing'
+                    ? '#2563eb'
+                    : connectionStatus === 'not_configured'
+                    ? '#ea580c'
+                    : '#dc2626',
+              }}
+            />
+            {connectionStatus === 'connected' && 'Supabase Cloud'}
+            {connectionStatus === 'syncing' && 'Syncing...'}
+            {connectionStatus === 'not_configured' && 'Cloud Not Configured'}
+            {connectionStatus === 'disconnected' && 'Cloud Disconnected'}
+          </button>
+
+          {/* User Profile or Sign-in button */}
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div

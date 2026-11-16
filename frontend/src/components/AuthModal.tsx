@@ -12,7 +12,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'signin',
 }) => {
-  const { signIn, signUp, isConfigured } = useAuth();
+  const { signIn, signUp, connectionStatus, refreshConnection } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,17 +49,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           onClose();
         }
       } else {
-        const { error, user } = await signUp(email.trim(), password, displayName.trim());
+        const { error, user, confirmationRequired } = await signUp(
+          email.trim(),
+          password,
+          displayName.trim()
+        );
         if (error) {
           setError(error.message);
-        } else if (user && !user.confirmed_at && user.identities?.length === 0) {
-          setSuccessMessage('Registration initiated! Please check your email to confirm your account.');
-        } else {
+        } else if (confirmationRequired) {
           setSuccessMessage(
-            isConfigured
-              ? 'Account created successfully! You are now logged in.'
-              : 'Account created! (Local Mode active until Supabase credentials are added to .env)'
+            'Registration successful! Please check your email to confirm your account before signing in.'
           );
+        } else if (user) {
+          setSuccessMessage('Account created successfully! Connected to Supabase Cloud.');
           setTimeout(() => {
             onClose();
           }, 1200);
@@ -120,7 +122,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px', margin: 0 }}>
               {mode === 'signin'
                 ? 'Access your saved matches and move history'
-                : 'Join to save your chess games permanently'}
+                : 'Join to save your chess games permanently in Supabase Cloud'}
             </p>
           </div>
           <button
@@ -139,40 +141,100 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
-        {/* Supabase Status / Setup Guidance */}
-        {!isConfigured ? (
+        {/* Supabase Status / Connection Indicator */}
+        <div
+          style={{
+            padding: '10px 18px',
+            backgroundColor:
+              connectionStatus === 'connected'
+                ? '#f0fdf4'
+                : connectionStatus === 'syncing'
+                ? '#eff6ff'
+                : connectionStatus === 'not_configured'
+                ? '#fff7ed'
+                : '#fef2f2',
+            borderBottom: `1px solid ${
+              connectionStatus === 'connected'
+                ? '#bbf7d0'
+                : connectionStatus === 'syncing'
+                ? '#bfdbfe'
+                : connectionStatus === 'not_configured'
+                ? '#fed7aa'
+                : '#fecaca'
+            }`,
+            fontSize: '0.8rem',
+            color:
+              connectionStatus === 'connected'
+                ? '#166534'
+                : connectionStatus === 'syncing'
+                ? '#1e40af'
+                : connectionStatus === 'not_configured'
+                ? '#9a3412'
+                : '#991b1b',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            lineHeight: 1.4,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor:
+                  connectionStatus === 'connected'
+                    ? '#16a34a'
+                    : connectionStatus === 'syncing'
+                    ? '#2563eb'
+                    : connectionStatus === 'not_configured'
+                    ? '#ea580c'
+                    : '#dc2626',
+              }}
+            />
+            <span>
+              {connectionStatus === 'connected' && <b>Connected: Supabase Cloud</b>}
+              {connectionStatus === 'syncing' && <b>Syncing: Synchronizing data</b>}
+              {connectionStatus === 'not_configured' && (
+                <b>Not Configured: Supabase credentials missing</b>
+              )}
+              {connectionStatus === 'disconnected' && (
+                <b>Disconnected: Cloud connection unavailable</b>
+              )}
+            </span>
+          </div>
+          {connectionStatus === 'disconnected' && (
+            <button
+              type="button"
+              onClick={refreshConnection}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#991b1b',
+                fontSize: '0.75rem',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+              }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+
+        {connectionStatus === 'not_configured' && (
           <div
             style={{
-              padding: '12px 18px',
-              backgroundColor: '#eff6ff',
-              borderBottom: '1px solid #dbeafe',
-              fontSize: '0.8rem',
-              color: '#1e40af',
+              padding: '10px 18px',
+              backgroundColor: '#fffbeb',
+              fontSize: '0.76rem',
+              color: '#92400e',
+              borderBottom: '1px solid #fef3c7',
               lineHeight: 1.45,
             }}
           >
-            <b>ℹ️ Local Mode Active:</b> You can register and save games right now.
-            <div style={{ marginTop: '4px', fontSize: '0.74rem', color: '#3b82f6' }}>
-              To sync with Supabase PostgreSQL cloud, paste your <code>VITE_SUPABASE_URL</code> and{' '}
-              <code>VITE_SUPABASE_ANON_KEY</code> into <code>frontend/.env</code>.
-              To sync with Supabase PostgreSQL cloud, add <code>VITE_SUPABASE_URL</code> and{' '}
-              <code>VITE_SUPABASE_ANON_KEY</code> to <code>frontend/.env</code> (or to Vercel Environment Variables in production).
-            </div>
-          </div>
-        ) : (
-          <div
-            style={{
-              padding: '8px 18px',
-              backgroundColor: '#f0fdf4',
-              borderBottom: '1px solid #bbf7d0',
-              fontSize: '0.78rem',
-              color: '#166534',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <span>✓ Connected to Supabase Cloud</span>
+            To enable cloud storage and authentication, set <code>VITE_SUPABASE_URL</code> and{' '}
+            <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env</code>.
           </div>
         )}
 
@@ -277,7 +339,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             />
             {mode === 'signup' && (
               <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '4px', display: 'block' }}>
-                Minimum 6 characters. Passwords are secured with bcrypt / Supabase Auth.
+                Minimum 6 characters. Passwords are secured with bcrypt in Supabase Auth.
               </span>
             )}
           </div>

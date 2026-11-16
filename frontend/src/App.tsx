@@ -25,10 +25,13 @@ const MainApp: React.FC = () => {
 
   const fetchHealth = useCallback(async () => {
     setHealthLoading(true);
-    setHealthError(null);
     try {
       const data = await api.getHealth();
+      if (!data || data.status !== 'healthy' || !data.modules) {
+        throw new Error('Backend service returned an unexpected response format.');
+      }
       setHealth(data);
+      setHealthError(null);
     } catch (err: any) {
       setHealth(null);
       setHealthError(
@@ -41,7 +44,8 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, 30000);
+    // Auto-reconnect poll every 10s
+    const interval = setInterval(fetchHealth, 10000);
     return () => clearInterval(interval);
   }, [fetchHealth]);
 
@@ -66,15 +70,57 @@ const MainApp: React.FC = () => {
       <main className="main-layout" style={{ flex: 1 }}>
         {/* Offline Warning Banner */}
         {healthError && (
-          <div className="banner-error" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <b>Python Backend Disconnected:</b> Single-player chess is running in <b>In-Browser Client Engine</b> mode.
+          <div
+            className="banner-error"
+            style={{
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '16px',
+              flexWrap: 'wrap',
+              gap: '12px',
+              padding: '12px 16px',
+              borderRadius: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div>
+                <b>Python Backend Disconnected:</b> Single-player chess is running in{' '}
+                <b>In-Browser Client Engine</b> mode.
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#b91c1c' }}>
+                Status: {healthError}
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>To enable deep learning & online 1v1:</span>
-              <code style={{ fontSize: '0.75rem', backgroundColor: '#ffffff', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fca5a5' }}>
-                ./start_backend.sh
-              </code>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                onClick={fetchHealth}
+                disabled={healthLoading}
+                className="btn btn-secondary"
+                style={{
+                  fontSize: '0.78rem',
+                  padding: '4px 12px',
+                  backgroundColor: '#ffffff',
+                  color: '#991b1b',
+                  borderColor: '#fca5a5',
+                  cursor: healthLoading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {healthLoading ? 'Connecting...' : '↻ Retry Connection'}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Start backend:</span>
+                <code
+                  style={{
+                    fontSize: '0.75rem',
+                    backgroundColor: '#ffffff',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid #fca5a5',
+                  }}
+                >
+                  ./start_backend.sh
+                </code>
+              </div>
             </div>
           </div>
         )}

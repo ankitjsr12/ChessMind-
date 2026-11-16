@@ -9,7 +9,6 @@ import {
   Brain,
   ShieldCheck,
   RefreshCw,
-  AlertCircle,
   Timer,
   WifiOff,
 } from 'lucide-react';

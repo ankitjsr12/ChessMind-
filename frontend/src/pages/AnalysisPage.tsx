@@ -11,6 +11,50 @@ import { ExplainableAIPanel } from '../components/ExplainableAIPanel';
 import { useAuth } from '../context/AuthContext';
 import { SupabaseChessService } from '../services/supabaseChess';
 
+/** Build a lightweight client-side analysis when backend is offline. */
+function runClientAnalysis(fen: string): CandidateMove[] {
+  const board = new Chess(fen);
+  if (board.isGameOver()) return [];
+
+  const moves = board.moves({ verbose: true });
+  if (moves.length === 0) return [];
+
+  // Score every legal move with a quick shallow minimax (depth 1)
+  const scored: Array<{ san: string; uci: string; score: number }> = [];
+  const isWhite = board.turn() === 'w';
+
+  for (const m of moves) {
+    board.move(m);
+    let score = 0;
+    const boardMatrix = board.board();
+    const vals: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
+    for (const row of boardMatrix) {
+      for (const piece of row) {
+        if (!piece) continue;
+        const v = vals[piece.type] ?? 0;
+        score += piece.color === 'w' ? v : -v;
+      }
+    }
+    board.undo();
+    scored.push({ san: m.san, uci: `${m.from}${m.to}${m.promotion ?? ''}`, score });
+  }
+
+  // Sort best-first for the side to move
+  scored.sort((a, b) => (isWhite ? b.score - a.score : a.score - b.score));
+
+  return scored.slice(0, 4).map((s, idx) => ({
+    rank: idx + 1,
+    san: s.san,
+    uci: s.uci,
+    evaluationText: `${s.score >= 0 ? '+' : ''}${(s.score / 100).toFixed(1)}`,
+    scoreCentipawns: s.score,
+    winProbability: undefined,
+    qualityTier: idx === 0 ? 'excellent' : idx === 1 ? 'good' : 'inaccuracy',
+    pv: [],
+    isTopRecommendation: idx === 0,
+  }));
+}
+
 interface AnalysisPageProps {
   onOpenAuth?: () => void;
 }
@@ -22,6 +66,7 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [backendOffline, setBackendOffline] = useState<boolean>(false);
 
   const [bestMove, setBestMove] = useState<{ san: string; uci: string } | null>(null);
   const [scoreCentipawns, setScoreCentipawns] = useState<number>(0);
@@ -94,6 +139,7 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
         // Fallback gracefully
       }
 
+      setBackendOffline(false);
       setCandidates(topCandidates);
       if (bestMoveData.best_move) {
         setBestMove({ san: bestMoveData.best_move.san, uci: bestMoveData.best_move.uci });
@@ -112,7 +158,25 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
         setEvaluationText('+0.0');
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to analyze chess position.');
+      // ── Backend unreachable → fall back to in-browser client engine ──
+      const isNetworkError =
+        !err.response || err.code === 'ERR_NETWORK' || err.code === 'ECONNREFUSED';
+      if (isNetworkError) {
+        setBackendOffline(true);
+        setError(null); // suppress raw Network Error banner
+        const clientCandidates = runClientAnalysis(currentFen);
+        setCandidates(clientCandidates);
+        if (clientCandidates.length > 0) {
+          const top = clientCandidates[0];
+          setBestMove({ san: top.san, uci: top.uci });
+          setSelectedCandidate(top);
+          setScoreCentipawns(top.scoreCentipawns || 0);
+          setEvaluationText(top.evaluationText || '+0.0');
+        }
+      } else {
+        setBackendOffline(false);
+        setError(err.response?.data?.detail || err.message || 'Failed to analyze chess position.');
+      }
     } finally {
       setLoading(false);
     }
@@ -262,6 +326,20 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
       {error && (
         <div className="banner-error" style={{ marginBottom: '16px' }}>
           <span>⚠️ {error}</span>
+        </div>
+      )}
+
+      {backendOffline && !error && (
+        <div className="banner-error" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <b>Python Backend Disconnected:</b> Analysis is running in <b>In-Browser Client Engine</b> mode — basic move scoring only.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>For deep learning analysis:</span>
+            <code style={{ fontSize: '0.75rem', backgroundColor: '#ffffff', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fca5a5' }}>
+              ./start_backend.sh
+            </code>
+          </div>
         </div>
       )}
 

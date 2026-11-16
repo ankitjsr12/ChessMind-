@@ -9,7 +9,7 @@ interface MyGamesPageProps {
 }
 
 export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAuth }) => {
-  const { user, isConfigured } = useAuth();
+  const { user, isConfigured, connectionStatus, refreshConnection } = useAuth();
   const [games, setGames] = useState<DbGame[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
       const data = await SupabaseChessService.listUserGames();
       setGames(data);
     } catch (err: any) {
-      setError(err.message || 'Failed to load saved games.');
+      setError(err.message || 'Failed to load saved games from Supabase.');
     } finally {
       setLoading(false);
     }
@@ -83,6 +83,36 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
     }
   };
 
+  const renderStatusBadge = () => {
+    switch (connectionStatus) {
+      case 'connected':
+        return (
+          <span className="status-badge" style={{ backgroundColor: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '0.72rem' }}>
+            ☁️ Connected: Supabase Cloud
+          </span>
+        );
+      case 'syncing':
+        return (
+          <span className="status-badge" style={{ backgroundColor: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '0.72rem' }}>
+            🔄 Syncing: Synchronizing data
+          </span>
+        );
+      case 'not_configured':
+        return (
+          <span className="status-badge" style={{ backgroundColor: '#fff7ed', color: '#9a3412', border: '1px solid #fed7aa', fontSize: '0.72rem' }}>
+            ⚠️ Not Configured: Supabase credentials missing
+          </span>
+        );
+      case 'disconnected':
+      default:
+        return (
+          <span className="status-badge" style={{ backgroundColor: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', fontSize: '0.72rem' }}>
+            ⚠️ Disconnected: Cloud connection unavailable
+          </span>
+        );
+    }
+  };
+
   // Unauthenticated State
   if (!user) {
     return (
@@ -103,6 +133,9 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
           >
             ♟
           </div>
+          <div style={{ display: 'inline-block', marginBottom: '12px' }}>
+            {renderStatusBadge()}
+          </div>
           <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '8px' }}>
             Cloud Saved Games
           </h2>
@@ -116,17 +149,15 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
                 marginBottom: '20px',
                 padding: '12px 16px',
                 borderRadius: '6px',
-                backgroundColor: '#eff6ff',
-                border: '1px solid #dbeafe',
+                backgroundColor: '#fff7ed',
+                border: '1px solid #fed7aa',
                 fontSize: '0.82rem',
-                color: '#1e40af',
+                color: '#9a3412',
                 textAlign: 'left',
               }}
             >
-              <b>💾 Local Storage Mode:</b> You can create an account and save games locally right now.
-              To sync games with Supabase PostgreSQL cloud, paste your <code>VITE_SUPABASE_URL</code> and{' '}
-              <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env</code>.
-              To sync games with Supabase PostgreSQL cloud, add <code>VITE_SUPABASE_URL</code> and{' '}
+              <b>Not Configured:</b> Supabase credentials missing.
+              To connect your database, add <code>VITE_SUPABASE_URL</code> and{' '}
               <code>VITE_SUPABASE_ANON_KEY</code> to <code>frontend/.env</code> (or to Vercel Environment Variables in production).
             </div>
           )}
@@ -150,139 +181,169 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <h1 className="page-title" style={{ margin: 0 }}>My Saved Games</h1>
-            {isConfigured ? (
-              <span className="status-badge" style={{ backgroundColor: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '0.72rem' }}>
-                ☁️ Supabase Cloud
-              </span>
-            ) : (
-              <span className="status-badge" style={{ backgroundColor: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', fontSize: '0.72rem' }}>
-                💾 Local Storage Mode
-              </span>
-            )}
+            {renderStatusBadge()}
           </div>
           <p className="page-description">
-            Your saved game library with full move histories and engine analyses.
+            Your saved game library with full move histories and engine analyses stored in Supabase PostgreSQL.
           </p>
         </div>
-        <button
-          onClick={fetchGames}
-          disabled={loading}
-          className="btn btn-secondary"
-          style={{ fontSize: '0.82rem', padding: '6px 12px' }}
-        >
-          {loading ? 'Refreshing...' : '↻ Refresh Games'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => {
+              refreshConnection();
+              fetchGames();
+            }}
+            disabled={loading}
+            className="btn btn-secondary"
+            style={{ fontSize: '0.82rem', padding: '6px 12px' }}
+          >
+            {loading ? 'Refreshing...' : '↻ Refresh Games'}
+          </button>
+        </div>
       </div>
 
       {error && (
-        <div className="banner-error" style={{ marginBottom: '16px' }}>
+        <div className="banner-error" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>⚠️ {error}</span>
+          <button
+            onClick={fetchGames}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#991b1b',
+              fontWeight: 600,
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+            }}
+          >
+            Retry Sync
+          </button>
         </div>
       )}
 
-      {/* Main Content Area */}
+      {/* Main Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: selectedGameDetails ? '1fr 1fr' : '1fr', gap: '24px' }}>
-        {/* Games Table Panel */}
-        <div className="panel" style={{ overflow: 'hidden' }}>
-          <div className="panel-header">
-            <span className="panel-title">Saved Matches</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              {games.length} total saved
+        {/* Games Table List */}
+        <div className="panel" style={{ padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0 }}>
+              Matches ({games.length})
+            </h2>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              Logged in as: <b>{user.email}</b>
             </span>
           </div>
 
           {loading && games.length === 0 ? (
-            <div style={{ padding: '36px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              Loading your saved games from Supabase...
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+              Loading matches from Supabase PostgreSQL...
             </div>
           ) : games.length === 0 ? (
-            <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📂</div>
-              <p style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
-                No saved games yet
-              </p>
-              <p style={{ fontSize: '0.82rem' }}>
-                Start a game on the "Play Chess" tab and click <b>Save to Cloud</b> to record your match permanently!
+            <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <p style={{ margin: '0 0 12px 0' }}>No saved games found in Supabase cloud database.</p>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', margin: 0 }}>
+                Play a game in the <b>Play Chess</b> tab and click <b>Save Match to Cloud</b> to store games permanently!
               </p>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table className="data-table">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
-                  <tr>
-                    <th>Game Title / Opponent</th>
-                    <th>Color</th>
-                    <th>Result</th>
-                    <th>Date Saved</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  <tr style={{ borderBottom: '2px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '10px 8px' }}>Title</th>
+                    <th style={{ padding: '10px 8px' }}>Opponent</th>
+                    <th style={{ padding: '10px 8px' }}>Colour</th>
+                    <th style={{ padding: '10px 8px' }}>Result</th>
+                    <th style={{ padding: '10px 8px' }}>Saved At</th>
+                    <th style={{ padding: '10px 8px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {games.map((g) => {
-                    const isSelected = selectedGameDetails?.id === g.id;
+                  {games.map((game) => {
+                    const isSelected = selectedGameDetails?.id === game.id;
+                    const dateFormatted = new Date(game.created_at).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    });
+
                     return (
                       <tr
-                        key={g.id}
+                        key={game.id}
                         style={{
-                          backgroundColor: isSelected ? 'var(--chess-blue-light)' : undefined,
+                          borderBottom: '1px solid var(--border-color)',
+                          backgroundColor: isSelected ? 'var(--bg-subtle)' : 'transparent',
                         }}
                       >
-                        <td>
-                          <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>
-                            {g.title || `Game vs ${g.opponent_type}`}
-                          </div>
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                            Opponent: {g.opponent_type}
-                          </div>
+                        <td style={{ padding: '12px 8px', fontWeight: 600 }}>
+                          {game.title || 'Untitled Match'}
                         </td>
-                        <td>
-                          <span style={{ textTransform: 'capitalize', fontWeight: 500 }}>
-                            {g.player_colour === 'white' ? '⚪ White' : '⚫ Black'}
+                        <td style={{ padding: '12px 8px', textTransform: 'capitalize' }}>
+                          {game.opponent_type}
+                        </td>
+                        <td style={{ padding: '12px 8px' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              textTransform: 'capitalize',
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: '10px',
+                                height: '10px',
+                                borderRadius: '50%',
+                                backgroundColor: game.player_colour === 'white' ? '#ffffff' : '#000000',
+                                border: '1px solid #94a3b8',
+                              }}
+                            />
+                            {game.player_colour}
                           </span>
                         </td>
-                        <td>{getResultBadge(g.result)}</td>
-                        <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                          {new Date(g.created_at).toLocaleDateString(undefined, {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                        <td style={{ padding: '12px 8px' }}>
+                          {getResultBadge(game.result)}
                         </td>
-                        <td style={{ textAlign: 'right' }}>
+                        <td style={{ padding: '12px 8px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          {dateFormatted}
+                        </td>
+                        <td style={{ padding: '12px 8px', textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', gap: '6px' }}>
                             <button
-                              onClick={() => handleViewDetails(g.id)}
-                              disabled={loadingDetails}
+                              onClick={() => handleViewDetails(game.id)}
                               className="btn btn-secondary"
-                              style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                              title="Inspect moves and analysis"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                              title="Inspect moves and engine evaluations"
                             >
-                              Details
+                              Inspect
                             </button>
                             {onResumeGame && (
                               <button
-                                onClick={() => onResumeGame(g)}
+                                onClick={() => onResumeGame(game)}
                                 className="btn btn-primary"
-                                style={{ padding: '4px 8px', fontSize: '0.75rem' }}
-                                title="Resume this match on Play Chess board"
+                                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                                title="Resume match on Play board"
                               >
                                 Resume
                               </button>
                             )}
                             <button
-                              onClick={() => handleDeleteGame(g.id, g.title)}
-                              disabled={deletingId === g.id}
-                              className="btn btn-secondary"
+                              onClick={() => handleDeleteGame(game.id, game.title)}
+                              disabled={deletingId === game.id}
                               style={{
-                                padding: '4px 8px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '3px 6px',
                                 fontSize: '0.75rem',
-                                color: 'var(--chess-red)',
-                                borderColor: '#fecaca',
                               }}
-                              title="Delete game from Supabase"
+                              title="Delete permanently from Supabase"
                             >
-                              {deletingId === g.id ? '...' : 'Delete'}
+                              {deletingId === game.id ? '...' : '✕'}
                             </button>
                           </div>
                         </td>
@@ -297,137 +358,132 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
 
         {/* Selected Game Details Panel */}
         {selectedGameDetails && (
-          <div className="panel" style={{ height: 'fit-content' }}>
-            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <span className="panel-title">
-                  {selectedGameDetails.title || 'Game Details'}
-                </span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginLeft: '8px' }}>
-                  ({selectedGameDetails.moves?.length || 0} moves recorded)
-                </span>
-              </div>
+          <div className="panel" style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0 }}>
+                Match Details: {selectedGameDetails.title || 'Selected Match'}
+              </h2>
               <button
                 onClick={() => setSelectedGameDetails(null)}
                 style={{
                   background: 'none',
                   border: 'none',
-                  fontSize: '1rem',
-                  color: 'var(--text-muted)',
+                  color: 'var(--text-dim)',
                   cursor: 'pointer',
+                  fontSize: '1rem',
                 }}
               >
                 ✕
               </button>
             </div>
 
-            <div style={{ padding: '16px' }}>
-              {/* Metadata Badges */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
-                {getResultBadge(selectedGameDetails.result)}
-                <span className="status-badge" style={{ backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
-                  Side: {selectedGameDetails.player_colour}
-                </span>
-                <span className="status-badge" style={{ backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
-                  Opponent: {selectedGameDetails.opponent_type}
-                </span>
+            {loadingDetails ? (
+              <div style={{ padding: '30px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+                Loading game moves & analysis...
               </div>
-
-              {/* FEN */}
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
-                  Current Position (FEN)
+            ) : (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '16px' }}>
+                  <div style={{ padding: '10px', backgroundColor: 'var(--bg-subtle)', borderRadius: '4px' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>RESULT</div>
+                    <div style={{ fontWeight: 600, marginTop: '2px' }}>{selectedGameDetails.result}</div>
+                  </div>
+                  <div style={{ padding: '10px', backgroundColor: 'var(--bg-subtle)', borderRadius: '4px' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>MOVES RECORDED</div>
+                    <div style={{ fontWeight: 600, marginTop: '2px' }}>{selectedGameDetails.moves?.length || 0}</div>
+                  </div>
+                  <div style={{ padding: '10px', backgroundColor: 'var(--bg-subtle)', borderRadius: '4px' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>ANALYSES</div>
+                    <div style={{ fontWeight: 600, marginTop: '2px' }}>{selectedGameDetails.analysis?.length || 0}</div>
+                  </div>
                 </div>
-                <code
+
+                {/* Move List */}
+                <h3 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '8px' }}>
+                  Move History ({selectedGameDetails.moves?.length || 0} plies)
+                </h3>
+                <div
                   style={{
-                    display: 'block',
-                    padding: '8px 10px',
-                    backgroundColor: 'var(--bg-subtle)',
+                    maxHeight: '160px',
+                    overflowY: 'auto',
+                    border: '1px solid var(--border-color)',
                     borderRadius: '4px',
-                    fontSize: '0.72rem',
-                    wordBreak: 'break-all',
+                    padding: '8px',
+                    marginBottom: '16px',
+                    fontSize: '0.8rem',
+                    fontFamily: 'monospace',
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '6px',
                   }}
                 >
-                  {selectedGameDetails.current_fen}
-                </code>
-              </div>
-
-              {/* Recorded Moves Sequence */}
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
-                  Move History ({selectedGameDetails.moves?.length || 0} plies)
-                </div>
-                {selectedGameDetails.moves && selectedGameDetails.moves.length > 0 ? (
-                  <div
-                    style={{
-                      maxHeight: '160px',
-                      overflowY: 'auto',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '4px',
-                      padding: '8px 12px',
-                      backgroundColor: 'var(--bg-surface)',
-                      fontSize: '0.82rem',
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '8px',
-                    }}
-                  >
-                    {selectedGameDetails.moves.map((m, idx) => (
-                      <span key={m.id || idx} style={{ display: 'inline-flex', gap: '2px' }}>
-                        {idx % 2 === 0 && (
-                          <span style={{ color: 'var(--text-dim)', fontWeight: 600 }}>
-                            {Math.floor(idx / 2) + 1}.
-                          </span>
-                        )}
-                        <span style={{ fontWeight: 500, color: 'var(--text-main)' }}>{m.san}</span>
+                  {selectedGameDetails.moves && selectedGameDetails.moves.length > 0 ? (
+                    selectedGameDetails.moves.map((m) => (
+                      <span
+                        key={m.id}
+                        style={{
+                          padding: '2px 6px',
+                          backgroundColor: 'var(--bg-subtle)',
+                          borderRadius: '3px',
+                        }}
+                      >
+                        {m.move_number}. <b>{m.san}</b>
                       </span>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                    No individual moves were recorded for this game.
-                  </div>
-                )}
-              </div>
-
-              {/* Saved Analysis (if present) */}
-              {selectedGameDetails.analysis && selectedGameDetails.analysis.length > 0 && (
-                <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px' }}>
-                    Saved Analysis Records ({selectedGameDetails.analysis.length})
-                  </div>
-                  {selectedGameDetails.analysis.map((a) => (
-                    <div
-                      key={a.id}
-                      style={{
-                        padding: '8px 10px',
-                        backgroundColor: 'var(--bg-subtle)',
-                        borderRadius: '4px',
-                        fontSize: '0.78rem',
-                        marginBottom: '6px',
-                      }}
-                    >
-                      <div>
-                        <b>Best Move:</b> {a.best_move} · <b>Evaluation:</b> {a.evaluation_score} · <b>Depth:</b> {a.search_depth}
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <span style={{ color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                      No moves recorded for this game.
+                    </span>
+                  )}
                 </div>
-              )}
 
-              {/* Actions Footer */}
-              <div style={{ marginTop: '20px', display: 'flex', gap: '8px' }}>
-                {onResumeGame && (
-                  <button
-                    onClick={() => onResumeGame(selectedGameDetails)}
-                    className="btn btn-primary"
-                    style={{ flex: 1, justifyContent: 'center' }}
-                  >
-                    Resume Game in Play Mode
-                  </button>
+                {/* Engine Analysis Records */}
+                {selectedGameDetails.analysis && selectedGameDetails.analysis.length > 0 && (
+                  <div>
+                    <h3 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '8px' }}>
+                      Stored Engine Evaluations
+                    </h3>
+                    <div style={{ maxHeight: '160px', overflowY: 'auto' }}>
+                      {selectedGameDetails.analysis.map((a) => (
+                        <div
+                          key={a.id}
+                          style={{
+                            padding: '8px',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '4px',
+                            marginBottom: '6px',
+                            fontSize: '0.78rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                            <span>Best Move: <b>{a.best_move}</b></span>
+                            <span>Eval: {a.evaluation_score >= 0 ? `+${a.evaluation_score}` : a.evaluation_score}</span>
+                          </div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: '2px' }}>
+                            Depth: {a.search_depth} | {new Date(a.created_at).toLocaleTimeString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
+
+                {/* Current FEN */}
+                <div style={{ marginTop: '14px' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    CURRENT FEN
+                  </div>
+                  <input
+                    type="text"
+                    readOnly
+                    value={selectedGameDetails.current_fen}
+                    className="input-text"
+                    style={{ width: '100%', fontSize: '0.75rem', fontFamily: 'monospace' }}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>

@@ -1,13 +1,15 @@
 """FastAPI Backend Service for ChessMind AI Analytics Dashboard."""
 
 from datetime import datetime, timezone
+import json
 import math
 import os
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 import chess
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.schemas import (
@@ -67,6 +69,161 @@ ranker = MoveRanker()
 opponent_engine = OpponentSearchEngine(default_depth=3, default_time_limit=1.5)
 ml_predictor = MLMoveQualityPredictor(autoload=True)
 neural_evaluator = NeuralPositionEvaluator(autoload=True)
+
+
+class RoomWebSocketManager:
+    """Thread-safe WebSocket connection broker for online multiplayer rooms."""
+
+    def __init__(self) -> None:
+        self._connections: Dict[str, List[WebSocket]] = {}
+        self._lock = threading.Lock()
+
+    async def connect(self, room_code: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        code = room_code.upper().strip()
+        with self._lock:
+            if code not in self._connections:
+                self._connections[code] = []
+            self._connections[code].append(websocket)
+
+    def disconnect(self, room_code: str, websocket: WebSocket) -> None:
+        code = room_code.upper().strip()
+        with self._lock:
+            if code in self._connections:
+                if websocket in self._connections[code]:
+                    self._connections[code].remove(websocket)
+                if not self._connections[code]:
+                    del self._connections[code]
+
+    async def broadcast_to_room(self, room_code: str, message: Dict[str, Any]) -> None:
+        code = room_code.upper().strip()
+        with self._lock:
+            conns = list(self._connections.get(code, []))
+        for ws in conns:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                pass
+
+
+ws_room_manager = RoomWebSocketManager()
+
+
+@app.get("/")
+def root_endpoint() -> Dict[str, Any]:
+    """Service metadata and health summary."""
+    return {
+        "service": "ChessMind AI Backend API",
+        "status": "online",
+        "version": "1.0.0",
+        "docs_url": "/docs",
+        "health_url": "/api/health",
+    }
+
+
+@app.get("/health")
+def root_health_check() -> Dict[str, Any]:
+    """Alias for /api/health to support standard health probes."""
+    return health_check()
+
+
+@app.websocket("/ws")
+async def websocket_general_endpoint(websocket: WebSocket) -> None:
+    """General WebSocket connection endpoint for ping/pong and connection testing."""
+    await websocket.accept()
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "service": "ChessMind AI WebSocket Gateway",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        while True:
+            data = await websocket.receive_text()
+            try:
+                payload = json.loads(data)
+                action = payload.get("action", "ping")
+            except Exception:
+                action = data.strip().lower()
+
+            if action == "ping":
+                await websocket.send_json({
+                    "type": "pong",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            elif action == "health":
+                await websocket.send_json({
+                    "type": "health",
+                    "data": health_check(),
+                })
+            else:
+                await websocket.send_json({
+                    "type": "ack",
+                    "received": data,
+                })
+    except WebSocketDisconnect:
+        pass
+
+
+@app.websocket("/ws/rooms/{room_code}")
+async def websocket_room_endpoint(websocket: WebSocket, room_code: str) -> None:
+    """WebSocket endpoint for real-time 1v1 online chess room synchronization."""
+    code = room_code.upper().strip()
+    room = room_manager.get_room(code)
+    if not room:
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "detail": f"Room '{code}' not found.",
+        })
+        await websocket.close(code=4004)
+        return
+
+    await ws_room_manager.connect(code, websocket)
+    try:
+        await websocket.send_json({
+            "type": "room_state",
+            "room_code": code,
+            "room": room.to_dict(),
+        })
+
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+            except Exception:
+                msg = {"action": data.strip()}
+
+            action = msg.get("action", "").lower()
+            if action == "ping":
+                await websocket.send_json({"type": "pong", "room_code": code})
+            elif action == "sync":
+                room.check_timeouts()
+                await websocket.send_json({
+                    "type": "room_state",
+                    "room_code": code,
+                    "room": room.to_dict(),
+                })
+            elif action == "move":
+                user_id = msg.get("user_id")
+                move_str = msg.get("move")
+                if user_id and move_str:
+                    try:
+                        res = room.make_authoritative_move(user_id=user_id, move_str=move_str)
+                        broadcast_data = {
+                            "type": "move_played",
+                            "room_code": code,
+                            "played_move": res.move_record.san,
+                            "fen": room.engine.fen,
+                            "turn": room.engine.turn.value,
+                            "is_check": res.move_record.is_check,
+                            "is_game_over": room.status == RoomStatus.COMPLETED,
+                            "room": room.to_dict(),
+                        }
+                        await ws_room_manager.broadcast_to_room(code, broadcast_data)
+                    except Exception as err:
+                        await websocket.send_json({"type": "error", "detail": str(err)})
+    except WebSocketDisconnect:
+        ws_room_manager.disconnect(code, websocket)
 
 
 @app.get("/api/health")
