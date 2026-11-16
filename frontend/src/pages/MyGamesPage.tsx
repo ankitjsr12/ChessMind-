@@ -126,6 +126,8 @@ export const MyGamesPage: React.FC<MyGamesPageProps> = ({ onResumeGame, onOpenAu
               <b>💾 Local Storage Mode:</b> You can create an account and save games locally right now.
               To sync games with Supabase PostgreSQL cloud, paste your <code>VITE_SUPABASE_URL</code> and{' '}
               <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env</code>.
+              To sync games with Supabase PostgreSQL cloud, add <code>VITE_SUPABASE_URL</code> and{' '}
+              <code>VITE_SUPABASE_ANON_KEY</code> to <code>frontend/.env</code> (or to Vercel Environment Variables in production).
             </div>
           )}
 

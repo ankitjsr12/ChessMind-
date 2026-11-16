@@ -66,13 +66,16 @@ const MainApp: React.FC = () => {
       <main className="main-layout" style={{ flex: 1 }}>
         {/* Offline Warning Banner */}
         {healthError && (
-          <div className="banner-error" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div className="banner-error" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
             <div>
-              <b>Backend Disconnected:</b> {healthError}
+              <b>Python Backend Disconnected:</b> Single-player chess is running in <b>In-Browser Client Engine</b> mode.
             </div>
-            <code style={{ fontSize: '0.75rem', backgroundColor: '#ffffff', padding: '2px 6px', borderRadius: '3px' }}>
-              uvicorn backend.api.main:app --port 8000
-            </code>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>To enable deep learning & online 1v1:</span>
+              <code style={{ fontSize: '0.75rem', backgroundColor: '#ffffff', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fca5a5' }}>
+                ./start_backend.sh
+              </code>
+            </div>
           </div>
         )}
 

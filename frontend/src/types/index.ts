@@ -4,7 +4,7 @@
 
 export type PieceColor = 'white' | 'black';
 
-export type QualityTier = 'excellent' | 'good' | 'inaccuracy' | 'mistake' | 'blunder';
+export type QualityTier = 'brilliant' | 'best' | 'excellent' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'missed_win';
 
 export interface MoveRecord {
   san: string;
@@ -107,16 +107,63 @@ export interface GameReviewItem {
   best_move_uci: string;
   cp_loss: number;
   accuracy: number;
-  quality: QualityTier | 'best';
+  quality: QualityTier;
+  explanation?: string;
+  is_check?: boolean;
+  is_checkmate?: boolean;
   fen_after: string;
+}
+
+export interface GameInfo {
+  white: string;
+  black: string;
+  white_elo: string;
+  black_elo: string;
+  result: string;
+  date: string;
+  event: string;
+  eco: string;
+  opening: string;
 }
 
 export interface GameReviewReport {
   total_plies: number;
   opening: string;
+  eco?: string;
   white_accuracy: number;
   black_accuracy: number;
   moves: GameReviewItem[];
+  game_info?: GameInfo;
+}
+
+export interface BookContinuation {
+  san: string;
+  uci: string;
+  eco: string;
+  variation: string;
+  depth_in_book: number;
+}
+
+export interface OpeningExplorerResult {
+  fen: string;
+  eco: string;
+  opening_name: string;
+  book_moves_count: number;
+  book_continuations: BookContinuation[];
+}
+
+export interface ImportedOnlineGame {
+  id: string;
+  platform: 'lichess' | 'chesscom';
+  white: string;
+  black: string;
+  white_elo: string;
+  black_elo: string;
+  result: string;
+  speed?: string;
+  moves_san: string[];
+  ply_count: number;
+  url?: string;
 }
 
 export interface ModelComparisonReport {

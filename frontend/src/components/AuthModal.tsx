@@ -155,6 +155,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div style={{ marginTop: '4px', fontSize: '0.74rem', color: '#3b82f6' }}>
               To sync with Supabase PostgreSQL cloud, paste your <code>VITE_SUPABASE_URL</code> and{' '}
               <code>VITE_SUPABASE_ANON_KEY</code> into <code>frontend/.env</code>.
+              To sync with Supabase PostgreSQL cloud, add <code>VITE_SUPABASE_URL</code> and{' '}
+              <code>VITE_SUPABASE_ANON_KEY</code> to <code>frontend/.env</code> (or to Vercel Environment Variables in production).
             </div>
           </div>
         ) : (

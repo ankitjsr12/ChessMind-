@@ -103,6 +103,59 @@ class ChessApiService {
   }
 
   /**
+   * Parse raw PGN text, extract game headers and movetext, and run complete accuracy review.
+   */
+  async reviewPgn(pgn: string): Promise<{ game_info: any; review: GameReviewReport }> {
+    const res = await this.client.post<{ game_info: any; review: GameReviewReport }>('/api/review/pgn', {
+      pgn,
+    });
+    return res.data;
+  }
+
+  /**
+   * Fetch public games from Lichess for a player username.
+   */
+  async importLichess(username: string, maxGames: number = 5) {
+    const res = await this.client.post<{
+      platform: string;
+      username: string;
+      games_count: number;
+      games: any[];
+    }>('/api/import/lichess', {
+      username,
+      max_games: maxGames,
+    });
+    return res.data;
+  }
+
+  /**
+   * Fetch public games from Chess.com for a player username.
+   */
+  async importChessCom(username: string, maxGames: number = 5) {
+    const res = await this.client.post<{
+      platform: string;
+      username: string;
+      games_count: number;
+      games: any[];
+    }>('/api/import/chesscom', {
+      username,
+      max_games: maxGames,
+    });
+    return res.data;
+  }
+
+  /**
+   * Retrieve recognized opening info and candidate book continuation moves.
+   */
+  async getOpeningExplorer(fen: string, moves?: string[]) {
+    const res = await this.client.post('/api/openings/explorer', {
+      fen,
+      moves,
+    });
+    return res.data;
+  }
+
+  /**
    * Module 7: Multi-Model Benchmark & Latency Comparison.
    */
   async compareModels(fen: string, candidateMoves?: string[]): Promise<ModelComparisonReport> {

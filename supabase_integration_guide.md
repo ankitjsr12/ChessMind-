@@ -77,3 +77,26 @@ In your Render Web Service -> **Environment**:
     EXISTS (SELECT 1 FROM games WHERE games.id = game_moves.game_id AND games.user_id = auth.uid())
     ```
   - Users cannot access, modify, or delete any other user's records even if they manipulate request parameters or game IDs.
+
+---
+
+## 6. Step 4: Run the Online 1v1 Two-Player Schema Migration (Phase 1)
+
+When you are ready to enable online multiplayer in Supabase:
+
+1. Open your [Supabase Dashboard](https://supabase.com/dashboard).
+2. Select your project and navigate to **SQL Editor**.
+3. Click **New Query**.
+4. Copy and paste the contents of [`supabase/migrations/20261102_online_two_player_schema.sql`](file:///Users/ak/project%20/chess%20predication/supabase/migrations/20261102_online_two_player_schema.sql).
+5. Click **Run** (or press `Cmd + Enter`).
+
+### Key Schema Additions in Migration 2:
+- **Two-Player Support**: Adds `white_player_id`, `black_player_id`, and `room_code` to `public.games`.
+- **Authoritative Clocks**: Adds `time_control_seconds`, `increment_seconds`, `white_time_remaining_ms`, and `black_time_remaining_ms`.
+- **Termination Details**: Adds `winner_id`, `winner_color`, and `termination_reason` (`checkmate`, `resignation`, `timeout`, `agreed_draw`, `stalemate`, etc.).
+- **Provisional Ratings**: Adds `rating_rapid`, `rating_blitz`, `is_provisional_rapid`, `is_provisional_blitz`, `games_played`, `wins`, `losses`, and `draws` to `public.profiles`. Ratings initialize as `NULL` (unrated) rather than a fabricated default score.
+- **Privacy-Preserving RLS**:
+  - Private games (`is_private = TRUE`) remain strictly confidential to their participants (`user_id`, `white_player_id`, `black_player_id`), even after completion.
+  - Public games (`is_private = FALSE`) become readable by authenticated users once `status = 'completed'`.
+  - Browser direct writes are restricted to single-player AI games; online 1v1 games are written authoritatively by the backend server via `SUPABASE_SERVICE_ROLE_KEY`.
+

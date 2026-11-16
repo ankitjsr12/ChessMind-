@@ -30,6 +30,13 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
   const [tacticalThreat, setTacticalThreat] = useState<string | undefined>();
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateMove | null>(null);
 
+  // ECO Opening Explorer State
+  const [openingInfo, setOpeningInfo] = useState<{
+    eco: string;
+    name: string;
+    continuations: Array<{ san: string; uci: string; eco: string; variation: string; depth_in_book: number }>;
+  } | null>(null);
+
   const [isSavingAnalysis, setIsSavingAnalysis] = useState<boolean>(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
@@ -68,6 +75,20 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
             }
             setTacticalThreat(oppReply.tactical_threat);
           }
+        }
+      } catch {
+        // Fallback gracefully
+      }
+
+      // Fetch ECO Opening Explorer Data
+      try {
+        const openingData = await api.getOpeningExplorer(currentFen);
+        if (openingData) {
+          setOpeningInfo({
+            eco: openingData.eco,
+            name: openingData.opening_name,
+            continuations: openingData.book_continuations || [],
+          });
         }
       } catch {
         // Fallback gracefully
@@ -127,6 +148,19 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
       setError(null);
     } catch {
       setError('Invalid FEN format. Please provide a standard 6-field chess FEN.');
+    }
+  };
+
+  const handlePlaySanMove = (san: string) => {
+    try {
+      const newGame = new Chess(game.fen());
+      const move = newGame.move(san);
+      if (move) {
+        setGame(newGame);
+        setFenInput(newGame.fen());
+      }
+    } catch {
+      // Ignore
     }
   };
 
@@ -313,6 +347,64 @@ export const AnalysisPage: React.FC<AnalysisPageProps> = ({ onOpenAuth }) => {
 
         {/* Right: Candidates & Diagnostics */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* ECO Opening Explorer Card */}
+          {openingInfo && (
+            <div className="card" style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="badge" style={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', fontWeight: 800 }}>
+                    {openingInfo.eco}
+                  </span>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#fff' }}>
+                    {openingInfo.name}
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Opening Explorer
+                </span>
+              </div>
+
+              {openingInfo.continuations.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontWeight: 600 }}>
+                    Book Continuation Lines:
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {openingInfo.continuations.map((c, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handlePlaySanMove(c.san)}
+                        style={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '4px 10px',
+                          color: '#38bdf8',
+                          fontFamily: 'monospace',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.15)';
+                          e.currentTarget.style.borderColor = '#38bdf8';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                          e.currentTarget.style.borderColor = 'var(--border-color)';
+                        }}
+                        title={`Play ${c.san} (${c.variation})`}
+                      >
+                        {c.san} <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 400 }}>({c.eco})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <CandidateMovesList
             candidates={candidates}
             selectedMoveUci={selectedCandidate?.uci}

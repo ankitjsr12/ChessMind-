@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import math
 import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 import chess
 from fastapi import FastAPI, HTTPException
@@ -11,16 +12,38 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.schemas import (
     CandidatesRequest,
+    ChessComImportRequest,
+    CreateRoomRequest,
     GameReviewRequest,
+    JoinRoomRequest,
+    LichessImportRequest,
     ModelComparisonRequest,
     MoveRequest,
+    OpeningExplorerRequest,
+    PGNReviewRequest,
     PlayAIRequest,
     PositionRequest,
+    RoomActionRequest,
+    RoomMoveRequest,
 )
-from backend.chess_engine import ChessEngine, IllegalMoveError, InvalidFENError
+from backend.chess_engine import (
+    ChessEngine,
+    IllegalMoveError,
+    InvalidFENError,
+    blunder_detector,
+    opening_book,
+    pgn_service,
+)
 from backend.chess_engine.models import PieceColor
 from backend.deep_learning import NeuralPositionEvaluator
 from backend.ml import MLMoveQualityPredictor
+from backend.online_rooms import (
+    ColorPreference,
+    OnlineRoom,
+    PlayerConnectionState,
+    RoomStatus,
+    room_manager,
+)
 from backend.opponent_prediction import OpponentSearchEngine, PositionEvaluator
 from backend.predictor import MoveRanker
 
@@ -65,7 +88,9 @@ def health_check() -> Dict[str, Any]:
             "opponent_search": True,
             "ml_model_trained": ml_predictor.is_trained,
             "neural_model_trained": neural_evaluator.is_trained,
+            "online_rooms": True,
         },
+        "active_rooms": room_manager.active_rooms_count(),
         "device": str(neural_evaluator.device) if neural_evaluator.is_trained else "cpu",
     }
 
@@ -264,7 +289,7 @@ def predict_neural_evaluation(req: CandidatesRequest) -> Dict[str, Any]:
 
 @app.post("/api/review/game")
 def review_game(req: GameReviewRequest) -> Dict[str, Any]:
-    """Module 7: Move-by-move game accuracy review, opening identification, and blunder detection."""
+    """Module 7: Move-by-move game accuracy review, ECO opening identification, and tactical blunder detection."""
     try:
         board = chess.Board(req.initial_fen or chess.STARTING_FEN)
         move_reviews: List[Dict[str, Any]] = []
@@ -272,16 +297,17 @@ def review_game(req: GameReviewRequest) -> Dict[str, Any]:
         white_accuracies: List[float] = []
         black_accuracies: List[float] = []
 
-        prev_eval_cp = 0.0
-
         for ply_idx, move_str in enumerate(req.moves):
             turn_color = board.turn
             move = board.parse_san(move_str) if move_str in [board.san(m) for m in board.legal_moves] else chess.Move.from_uci(move_str)
+
+            board_before = board.copy()
 
             # 1. Best move before playing
             best_res = ranker.predict_best_moves(board.fen(), candidate_count=2, depth=2)
             best_move_san = best_res.best_move_san
             best_move_uci = best_res.best_move_uci
+            best_move_obj = chess.Move.from_uci(best_move_uci) if best_move_uci else None
 
             best_cp = best_res.candidates[0].evaluation.score_white_cp if best_res.candidates and best_res.candidates[0].evaluation.score_white_cp is not None else 0.0
 
@@ -293,32 +319,24 @@ def review_game(req: GameReviewRequest) -> Dict[str, Any]:
             eval_after = PositionEvaluator.evaluate(board)
             played_cp = eval_after
 
-            # Calculate cp delta from perspective of player who moved
-            if turn_color == chess.WHITE:
-                cp_loss = max(0.0, float(best_cp - played_cp))
-            else:
-                cp_loss = max(0.0, float(played_cp - best_cp))
+            # Normalize perspective for player who moved
+            player_best_cp = best_cp if turn_color == chess.WHITE else -best_cp
+            player_played_cp = played_cp if turn_color == chess.WHITE else -played_cp
 
-            # Documented Accuracy Formula:
-            # Acc = 103.1668 * exp(-0.04354 * cp_loss) - 3.1669 (clamped [0, 100])
-            accuracy = max(0.0, min(100.0, 103.1668 * math.exp(-0.04354 * min(cp_loss, 300.0)) - 3.1669))
-
-            # Quality classification
-            if cp_loss <= 15:
-                quality = "best"
-            elif cp_loss <= 35:
-                quality = "good"
-            elif cp_loss <= 90:
-                quality = "inaccuracy"
-            elif cp_loss <= 200:
-                quality = "mistake"
-            else:
-                quality = "blunder"
+            # Senior Tactical Classification with Explanations
+            classification = blunder_detector.classify_move(
+                board_before=board_before,
+                move=move,
+                board_after=board,
+                played_cp=player_played_cp,
+                best_cp=player_best_cp,
+                best_move=best_move_obj,
+            )
 
             if turn_color == chess.WHITE:
-                white_accuracies.append(accuracy)
+                white_accuracies.append(classification["accuracy"])
             else:
-                black_accuracies.append(accuracy)
+                black_accuracies.append(classification["accuracy"])
 
             move_reviews.append({
                 "ply": ply_idx + 1,
@@ -328,39 +346,112 @@ def review_game(req: GameReviewRequest) -> Dict[str, Any]:
                 "played_eval_cp": played_cp,
                 "best_move_san": best_move_san,
                 "best_move_uci": best_move_uci,
-                "cp_loss": round(cp_loss, 1),
-                "accuracy": round(accuracy, 1),
-                "quality": quality,
+                "cp_loss": classification["cp_loss"],
+                "accuracy": classification["accuracy"],
+                "quality": classification["quality"],
+                "explanation": classification["explanation"],
+                "is_check": classification["is_check"],
+                "is_checkmate": classification["is_checkmate"],
                 "fen_after": board.fen(),
             })
-            prev_eval_cp = played_cp
 
         overall_white_acc = float(sum(white_accuracies) / max(1, len(white_accuracies)))
         overall_black_acc = float(sum(black_accuracies) / max(1, len(black_accuracies)))
 
-        # Opening identification heuristic based on first moves
-        opening_name = "Custom / Standard Game"
-        if len(req.moves) >= 2:
-            m1 = req.moves[0]
-            if m1 in ("e4", "e2e4"):
-                m2 = req.moves[1]
-                if m2 in ("e5", "e7e5"):
-                    opening_name = "Open Game (King's Pawn)"
-                elif m2 in ("c5", "c7c5"):
-                    opening_name = "Sicilian Defense"
-                elif m2 in ("e6", "e7e6"):
-                    opening_name = "French Defense"
-                elif m2 in ("c6", "c7c6"):
-                    opening_name = "Caro-Kann Defense"
-            elif m1 in ("d4", "d2d4"):
-                opening_name = "Queen's Pawn Opening"
+        # Accurate ECO Opening identification
+        opening_entry = opening_book.identify_opening(req.moves)
 
         return {
             "total_plies": len(req.moves),
-            "opening": opening_name,
+            "opening": opening_entry.name,
+            "eco": opening_entry.eco,
             "white_accuracy": round(overall_white_acc, 1),
             "black_accuracy": round(overall_black_acc, 1),
             "moves": move_reviews,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/review/pgn")
+def review_pgn(req: PGNReviewRequest) -> Dict[str, Any]:
+    """Parse raw PGN text, extract game headers and movetext, and run complete accuracy review."""
+    try:
+        parsed_game = pgn_service.parse_pgn_text(req.pgn)
+        review_res = review_game(GameReviewRequest(
+            moves=parsed_game["moves_san"],
+            initial_fen=parsed_game.get("initial_fen"),
+        ))
+
+        return {
+            "game_info": {
+                "white": parsed_game["white"],
+                "black": parsed_game["black"],
+                "white_elo": parsed_game["white_elo"],
+                "black_elo": parsed_game["black_elo"],
+                "result": parsed_game["result"],
+                "date": parsed_game["date"],
+                "event": parsed_game["event"],
+                "eco": parsed_game["eco"] or review_res["eco"],
+                "opening": review_res["opening"],
+            },
+            "review": review_res,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"PGN Review Error: {str(e)}")
+
+
+@app.post("/api/import/lichess")
+def import_lichess(req: LichessImportRequest) -> Dict[str, Any]:
+    """Fetch public games from Lichess for a player username."""
+    try:
+        games = pgn_service.fetch_lichess_games(req.username, max_games=req.max_games)
+        return {
+            "platform": "lichess",
+            "username": req.username,
+            "games_count": len(games),
+            "games": games,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lichess Import Failed: {str(e)}")
+
+
+@app.post("/api/import/chesscom")
+def import_chesscom(req: ChessComImportRequest) -> Dict[str, Any]:
+    """Fetch public games from Chess.com for a player username."""
+    try:
+        games = pgn_service.fetch_chesscom_games(req.username, max_games=req.max_games)
+        return {
+            "platform": "chesscom",
+            "username": req.username,
+            "games_count": len(games),
+            "games": games,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chess.com Import Failed: {str(e)}")
+
+
+@app.post("/api/openings/explorer")
+def opening_explorer(req: OpeningExplorerRequest) -> Dict[str, Any]:
+    """Retrieve recognized opening info and candidate book continuation moves for a position."""
+    try:
+        # 1. Identify current opening if moves provided
+        opening_entry = opening_book.identify_opening(req.moves or [])
+        # 2. Get candidate continuations
+        candidate_continuations = opening_book.get_candidate_book_moves(req.fen)
+
+        return {
+            "fen": req.fen,
+            "eco": opening_entry.eco,
+            "opening_name": opening_entry.name,
+            "book_moves_count": len(candidate_continuations),
+            "book_continuations": candidate_continuations,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -440,3 +531,152 @@ def compare_models(req: ModelComparisonRequest) -> Dict[str, Any]:
         "fen": req.fen,
         "benchmarks": benchmarks,
     }
+
+
+# -----------------------------------------------------------------------------
+# Online 1v1 Room Management Endpoints
+# -----------------------------------------------------------------------------
+
+@app.post("/api/rooms/create")
+def create_room_endpoint(req: CreateRoomRequest) -> Dict[str, Any]:
+    """Create a new private or public online chess room."""
+    user_id = req.user_id or str(uuid.uuid4())
+    username = req.username or "Player 1"
+
+    pref = ColorPreference.RANDOM
+    if req.color_preference.lower() == "white":
+        pref = ColorPreference.WHITE
+    elif req.color_preference.lower() == "black":
+        pref = ColorPreference.BLACK
+
+    try:
+        room = room_manager.create_room(
+            creator_user_id=user_id,
+            creator_username=username,
+            time_control_seconds=req.time_control_seconds,
+            increment_seconds=req.increment_seconds,
+            is_private=req.is_private,
+            color_preference=pref,
+        )
+        return {
+            "success": True,
+            "room_code": room.room_code,
+            "room": room.to_dict(current_user_id=user_id),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create room: {str(e)}")
+
+
+@app.post("/api/rooms/join")
+def join_room_endpoint(req: JoinRoomRequest) -> Dict[str, Any]:
+    """Join an existing online room using a room code."""
+    user_id = req.user_id or str(uuid.uuid4())
+    username = req.username or "Player 2"
+
+    try:
+        room, slot = room_manager.join_room(
+            room_code=req.room_code,
+            user_id=user_id,
+            username=username,
+        )
+        return {
+            "success": True,
+            "room_code": room.room_code,
+            "room": room.to_dict(current_user_id=user_id),
+            "assigned_color": slot.assigned_color.value if slot.assigned_color else None,
+            "player": slot.to_dict(),
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Room '{req.room_code}' was not found.")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to join room: {str(e)}")
+
+
+@app.get("/api/rooms/public")
+def list_public_rooms_endpoint() -> Dict[str, Any]:
+    """List open public rooms currently waiting for an opponent."""
+    rooms = room_manager.list_public_waiting_rooms()
+    return {
+        "count": len(rooms),
+        "rooms": [r.to_dict() for r in rooms],
+    }
+
+
+@app.get("/api/rooms/{room_code}")
+def get_room_state_endpoint(room_code: str) -> Dict[str, Any]:
+    """Inspect current authoritative state of an online room."""
+    room = room_manager.get_room(room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room '{room_code}' not found.")
+
+    # Check for any elapsed timeouts on inspection
+    room.check_timeouts()
+
+    return {
+        "room_code": room.room_code,
+        "room": room.to_dict(),
+    }
+
+
+@app.post("/api/rooms/move")
+def play_room_move_endpoint(req: RoomMoveRequest) -> Dict[str, Any]:
+    """Execute a validated move on the authoritative game board."""
+    room = room_manager.get_room(req.room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room '{req.room_code}' not found.")
+
+    try:
+        res = room.make_authoritative_move(user_id=req.user_id, move_str=req.move)
+        return {
+            "success": True,
+            "played_move": res.move_record.san,
+            "fen": room.engine.fen,
+            "turn": room.engine.turn.value,
+            "is_check": res.move_record.is_check,
+            "is_game_over": room.status == RoomStatus.COMPLETED,
+            "room": room.to_dict(current_user_id=req.user_id),
+        }
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except IllegalMoveError as ime:
+        raise HTTPException(status_code=422, detail=f"Illegal move: {ime.move_str}")
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+
+@app.post("/api/rooms/action")
+def room_action_endpoint(req: RoomActionRequest) -> Dict[str, Any]:
+    """Execute an in-game match action (resign, offer_draw, accept_draw, decline_draw, leave)."""
+    room = room_manager.get_room(req.room_code)
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room '{req.room_code}' not found.")
+
+    action = req.action.lower().strip()
+
+    if action == "resign":
+        ok = room.resign(req.user_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail="Cannot resign: match is not active or unauthorized user.")
+    elif action == "offer_draw":
+        ok = room.offer_draw(req.user_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail="Cannot offer draw at this time.")
+    elif action == "accept_draw":
+        ok = room.accept_draw(req.user_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail="No pending draw offer to accept.")
+    elif action == "decline_draw":
+        room.decline_draw(req.user_id)
+    elif action == "leave":
+        room_manager.leave_room(req.room_code, req.user_id)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unrecognized action '{req.action}'.")
+
+    return {
+        "success": True,
+        "action": action,
+        "room": room.to_dict(current_user_id=req.user_id),
+    }
+

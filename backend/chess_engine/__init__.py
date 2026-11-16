@@ -4,6 +4,9 @@ Exposes the primary ChessEngine class, models, and custom exceptions.
 """
 
 from backend.chess_engine.engine import ChessEngine
+from backend.chess_engine.openings import OpeningBook, OpeningEntry, opening_book
+from backend.chess_engine.pgn_service import PGNService, pgn_service
+from backend.chess_engine.blunder_detector import BlunderDetector, blunder_detector
 from backend.chess_engine.exceptions import (
     ChessEngineException,
     GameOverError,
@@ -28,6 +31,13 @@ from backend.chess_engine.models import (
 
 __all__ = [
     "ChessEngine",
+    "OpeningBook",
+    "OpeningEntry",
+    "opening_book",
+    "PGNService",
+    "pgn_service",
+    "BlunderDetector",
+    "blunder_detector",
     "BaseMovePredictor",
     "BoardState",
     "CastlingRights",

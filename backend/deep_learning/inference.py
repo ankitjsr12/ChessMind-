@@ -1,6 +1,7 @@
 """Inference service for Neural Chess Position Evaluation and candidate move ranking."""
 
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional, Union
 import chess
@@ -43,6 +44,7 @@ class NeuralPositionEvaluator:
         self.model_type: str = "cnn"
         self.target_scale: float = 400.0
         self.best_val_loss: float = 0.0
+        self._lock = threading.Lock()
 
         if autoload and os.path.exists(self.checkpoint_path):
             self.load_model(self.checkpoint_path)
@@ -99,8 +101,8 @@ class NeuralPositionEvaluator:
         # 1. Encode position
         tensor = BoardEncoder.encode(board).unsqueeze(0).to(self.device)
 
-        # 2. Forward pass
-        with torch.no_grad():
+        # 2. Forward pass with thread-safety for Apple Silicon MPS
+        with self._lock, torch.no_grad():
             pred_target = self.model(tensor).item()
 
         white_cp = target_to_cp(pred_target, scale=self.target_scale)
@@ -178,9 +180,9 @@ class NeuralPositionEvaluator:
             post_boards.append(board.copy())
             board.pop()
 
-        # Batch forward pass for optimal performance
+        # Batch forward pass for optimal performance with thread-safety
         batch_tensors = BoardEncoder.encode_batch(post_boards).to(self.device)
-        with torch.no_grad():
+        with self._lock, torch.no_grad():
             batch_targets = self.model(batch_tensors).cpu().numpy().tolist()
 
         results: List[Dict[str, Any]] = []

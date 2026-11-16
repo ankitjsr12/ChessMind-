@@ -8,6 +8,7 @@ import type { DbGame } from '../types/database';
 import { MoveHistory } from '../components/MoveHistory';
 import { useAuth } from '../context/AuthContext';
 import { SupabaseChessService } from '../services/supabaseChess';
+import { getClientFallbackMove } from '../services/clientChessEngine';
 
 interface PlayPageProps {
   initialGameToResume?: DbGame | null;
@@ -152,11 +153,27 @@ export const PlayPage: React.FC<PlayPageProps> = ({ initialGameToResume, onOpenA
       setApiError(null);
 
       try {
-        const fen = currentGame.fen();
-        const data = await api.playAIMove(fen, difficulty);
+        let moveUci: string | undefined;
 
-        if (data && (data.move || data.ai_move_uci)) {
-          const moveUci = data.move || data.ai_move_uci;
+        try {
+          const fen = currentGame.fen();
+          const data = await api.playAIMove(fen, difficulty);
+
+          if (data && (data.move || data.ai_move_uci)) {
+            moveUci = data.move || data.ai_move_uci;
+          }
+        } catch (err: any) {
+          console.warn('Backend AI offline, using client-side fallback engine:', err?.message);
+          // Fallback to in-browser client engine
+          const fallback = getClientFallbackMove(currentGame.fen(), difficulty);
+          if (fallback) {
+            moveUci = fallback.uci;
+          } else {
+            setApiError(err.response?.data?.detail || err.message || 'AI move request failed.');
+          }
+        }
+
+        if (moveUci) {
           const from = moveUci.slice(0, 2) as Square;
           const to = moveUci.slice(2, 4) as Square;
           const promotion = moveUci.length > 4 ? moveUci[4] : undefined;
@@ -190,8 +207,6 @@ export const PlayPage: React.FC<PlayPageProps> = ({ initialGameToResume, onOpenA
             }
           }
         }
-      } catch (err: any) {
-        setApiError(err.response?.data?.detail || err.message || 'AI move request failed.');
       } finally {
         setIsAiThinking(false);
       }
